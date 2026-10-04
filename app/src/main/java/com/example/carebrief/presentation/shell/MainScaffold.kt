@@ -67,6 +67,7 @@ fun MainScaffold(onResetOnboarding: () -> Unit) {
                     Routes.PEOPLE -> current == Routes.PEOPLE || (current?.startsWith("profile/") == true)
                     Routes.NOTES -> current == Routes.NOTES || (current?.startsWith("note/") == true) ||
                         (current?.startsWith("analysis/") == true) || (current?.startsWith("summary/") == true)
+                    Routes.PLAN -> current == Routes.PLAN || (current?.startsWith("plan/") == true)
                     else -> current == tab
                 }
                 tabs.forEach { tab ->
@@ -95,7 +96,7 @@ fun MainScaffold(onResetOnboarding: () -> Unit) {
                 DashboardScreen(
                     onAddNote = { nav.navigate(Routes.noteNew("sarah")) },
                     onAnalyze = { nav.navigate(Routes.analysis("sarah")) },
-                    onViewPlan = { nav.navigate(Routes.PLAN) },
+                    onViewPlan = { nav.navigate(Routes.planDetail("sarah")) },
                     onSelectRecipient = { nav.navigate(Routes.profile("sarah")) }
                 )
             }
@@ -108,8 +109,23 @@ fun MainScaffold(onResetOnboarding: () -> Unit) {
                     onAnalyze = { id -> nav.navigate(Routes.analysis(id)) }
                 )
             }
-            composable(Routes.PLAN) { CarePlanScreen() }
-            composable(Routes.MORE) { MoreScreen(onResetOnboarding) }
+            composable(Routes.PLAN) {
+                CarePlanScreen(
+                    onEdit = { id -> nav.navigate(Routes.planEdit(id)) }
+                )
+            }
+            composable(
+                Routes.PLAN_DETAIL,
+                arguments = listOf(navArgument("recipientId") { type = NavType.StringType })
+            ) { entry ->
+                val id = entry.arguments?.getString("recipientId") ?: "sarah"
+                CarePlanScreen(
+                    recipientId = id,
+                    recipientName = displayName(id),
+                    onBack = { nav.popBackStack() },
+                    onEdit = { rid -> nav.navigate(Routes.planEdit(rid)) }
+                )
+            }
             composable(
                 Routes.PROFILE,
                 arguments = listOf(navArgument("recipientId") { type = NavType.StringType })
@@ -120,7 +136,7 @@ fun MainScaffold(onResetOnboarding: () -> Unit) {
                     onBack = { nav.popBackStack() },
                     onAddNote = { rid -> nav.navigate(Routes.noteNew(rid)) },
                     onAnalyze = { nav.navigate(Routes.analysis(id)) },
-                    onViewPlan = { nav.navigate(Routes.PLAN) }
+                    onViewPlan = { nav.navigate(Routes.planDetail(id)) }
                 )
             }
             composable(
@@ -165,7 +181,7 @@ fun MainScaffold(onResetOnboarding: () -> Unit) {
                     recipientName = displayName(id),
                     onBack = { nav.popBackStack() },
                     onAddNote = { nav.navigate(Routes.noteNew(id)) },
-                    onViewPlan = { nav.navigate(Routes.PLAN) }
+                    onViewPlan = { nav.navigate(Routes.planDetail(id)) }
                 )
             }
         }
