@@ -2,6 +2,7 @@ package com.example.carebrief.data
 
 import com.example.carebrief.core.model.CareRecipient
 import com.example.carebrief.core.model.DailyNote
+import com.example.carebrief.core.model.PlanStatus
 import com.example.carebrief.data.local.DemoData
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,6 +26,8 @@ interface CareBriefRepository {
         categories: List<String>,
         author: String
     ): DailyNote
+
+    fun setPlanStatus(recipientId: String, status: PlanStatus)
 }
 
 class DemoCareBriefRepository : CareBriefRepository {
@@ -71,6 +74,12 @@ class DemoCareBriefRepository : CareBriefRepository {
             if (it.id == recipientId) it.copy(lastNoteLabel = "Today, ${note.timeLabel}") else it
         }
         return note
+    }
+
+    override fun setPlanStatus(recipientId: String, status: PlanStatus) {
+        recipients.value = recipients.value.map {
+            if (it.id == recipientId) it.copy(planStatus = status) else it
+        }
     }
 
     companion object {

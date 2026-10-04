@@ -25,6 +25,7 @@ import androidx.navigation.navArgument
 import com.example.carebrief.core.navigation.Routes
 import com.example.carebrief.data.local.DemoData
 import com.example.carebrief.presentation.analysis.AnalysisScreen
+import com.example.carebrief.presentation.careplan.CarePlanEditorScreen
 import com.example.carebrief.presentation.careplan.CarePlanScreen
 import com.example.carebrief.presentation.dashboard.DashboardScreen
 import com.example.carebrief.presentation.editor.NoteEditorScreen
@@ -182,6 +183,22 @@ fun MainScaffold(onResetOnboarding: () -> Unit) {
                     onBack = { nav.popBackStack() },
                     onAddNote = { nav.navigate(Routes.noteNew(id)) },
                     onViewPlan = { nav.navigate(Routes.planDetail(id)) }
+                )
+            }
+            composable(
+                Routes.PLAN_EDIT,
+                arguments = listOf(navArgument("recipientId") { type = NavType.StringType })
+            ) { entry ->
+                val id = entry.arguments?.getString("recipientId") ?: "sarah"
+                CarePlanEditorScreen(
+                    recipientId = id,
+                    recipientName = displayName(id),
+                    onBack = { nav.popBackStack() },
+                    onApproved = {
+                        nav.navigate(Routes.planDetail(id)) {
+                            popUpTo(Routes.planEdit(id)) { inclusive = true }
+                        }
+                    }
                 )
             }
         }
