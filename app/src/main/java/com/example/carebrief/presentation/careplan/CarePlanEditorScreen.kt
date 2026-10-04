@@ -52,11 +52,13 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.carebrief.core.model.PlanStatus
 import com.example.carebrief.core.ui.components.CareBriefCard
+import com.example.carebrief.core.ui.components.ChipKind
 import com.example.carebrief.core.ui.components.DraftBadge
 import com.example.carebrief.core.ui.components.LoadingRow
 import com.example.carebrief.core.ui.components.PrimaryButton
 import com.example.carebrief.core.ui.components.SecondaryButton
 import com.example.carebrief.core.ui.components.SectionHeader
+import com.example.carebrief.core.ui.components.StatusChip
 import com.example.carebrief.core.ui.theme.CareBriefSpacing
 import com.example.carebrief.core.ui.theme.InkSecondary
 import com.example.carebrief.data.CareBriefRepository
@@ -189,7 +191,8 @@ fun CarePlanEditorScreen(
             Modifier.weight(1f).verticalScroll(scroll).padding(CareBriefSpacing.md),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            DraftBadge()
+            if (existing?.status == "ACTIVE") StatusChip("ACTIVE CARE PLAN", ChipKind.ACTIVE)
+            else DraftBadge()
             if (error != null) {
                 Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
             }
@@ -306,12 +309,15 @@ fun CarePlanEditorScreen(
             Text("Selected: ${reviewDateLabel(reviewDate)}", style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
 
             PrimaryButton(
-                "Save draft",
+                if (existing?.status == "ACTIVE") "Save changes" else "Save draft",
                 onClick = {
                     val problem = validatePlan(goal, actions.toList(), monitoring.toList())
                     if (problem != null) { error = problem; return@PrimaryButton }
-                    vm.save(currentPlan("DRAFT"))
-                    scope.launch { snackbar.showSnackbar("Draft saved") }
+                    val status = if (existing?.status == "ACTIVE") "ACTIVE" else "DRAFT"
+                    vm.save(currentPlan(status))
+                    scope.launch {
+                        snackbar.showSnackbar(if (status == "ACTIVE") "Care plan changes saved" else "Draft saved")
+                    }
                 },
                 modifier = Modifier.fillMaxWidth()
             )

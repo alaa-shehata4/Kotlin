@@ -86,10 +86,37 @@ class TaskStore(
 
     fun toggle(recipientId: String, taskId: String) {
         val flow = mutable(recipientId)
-        flow.value = flow.value.map {
-            if (it.id == taskId) it.copy(completed = !it.completed, updatedAtMillis = System.currentTimeMillis()) else it
+        val task = flow.value.firstOrNull { it.id == taskId } ?: return
+        val now = System.currentTimeMillis()
+        val completed = !task.completed
+        val updated = flow.value.map {
+            if (it.id == taskId) it.copy(completed = completed, updatedAtMillis = now) else it
         }
+        // Keep the completed occurrence visible, and add the next due occurrence
+        // for recurring actions. Undoing a completion only reopens that occurrence.
+        val nextDueDate = if (completed) nextOccurrence(task, LocalDate.now()) else null
+        flow.value = if (nextDueDate == null) updated else updated + task.copy(
+            id = UUID.randomUUID().toString(),
+            completed = false,
+            dueDateMillis = nextDueDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            dueLabel = dueLabel(nextDueDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()),
+            updatedAtMillis = now
+        )
         persist(recipientId, flow.value)
+    }
+
+    private fun nextOccurrence(task: CareTask, today: LocalDate): LocalDate? {
+        val intervalDays = when (task.frequency.lowercase()) {
+            "daily" -> 1L
+            "weekly" -> 7L
+            else -> return null
+        }
+        val dueDate = if (task.dueDateMillis > 0L) {
+            Instant.ofEpochMilli(task.dueDateMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+        } else today
+        var nextDate = dueDate.plusDays(intervalDays)
+        while (nextDate.isBefore(today)) nextDate = nextDate.plusDays(intervalDays)
+        return nextDate
     }
 
     fun update(task: CareTask) {
