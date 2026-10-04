@@ -1,5 +1,6 @@
 package com.example.carebrief.presentation.careplan
 
+import android.app.DatePickerDialog
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -9,6 +10,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -40,6 +44,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -70,6 +75,26 @@ private val MONITORING_OPTIONS = listOf(
 private val PRIORITIES = listOf("Low", "Normal", "High")
 private val REVIEW_PRESETS = listOf(3, 7, 14, 30)
 
+private fun defaultReviewDate() = LocalDate.now().plusDays(7)
+
+private fun reviewDateLabel(date: LocalDate): String = try {
+    date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
+} catch (_: Exception) {
+    date.toString()
+}
+
+private fun restoredReviewDate(plan: EditableCarePlan): LocalDate = runCatching {
+    if (plan.reviewDateMillis > 0L) {
+        java.time.Instant.ofEpochMilli(plan.reviewDateMillis)
+            .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+    } else {
+        LocalDate.parse(
+            plan.reviewDateLabel,
+            DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+        )
+    }
+}.getOrDefault(defaultReviewDate())
+
 class CarePlanEditorViewModel(
     private val recipientId: String,
     private val repo: CareBriefRepository = DemoCareBriefRepository.shared,
@@ -80,7 +105,7 @@ class CarePlanEditorViewModel(
 
     fun save(plan: EditableCarePlan) = store.save(plan)
 
-    fun approve(plan: EditableCarePlan) {
+    suspend fun approve(plan: EditableCarePlan) {
         store.save(plan.copy(status = "ACTIVE"))
         store.approve(recipientId)
         repo.setPlanStatus(recipientId, PlanStatus.ACTIVE)
@@ -91,13 +116,6 @@ class CarePlanEditorViewModel(
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
             CarePlanEditorViewModel(recipientId) as T
     }
-}
-
-private fun reviewLabel(daysOut: Int): String = try {
-    LocalDate.now().plusDays(daysOut.toLong())
-        .format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
-} catch (_: Exception) {
-    "In $daysOut days"
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -112,6 +130,7 @@ fun CarePlanEditorScreen(
     val notes by vm.notes.collectAsState(initial = null)
     val existing by vm.existing.collectAsState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val scroll = rememberScrollState()
 
@@ -121,7 +140,7 @@ fun CarePlanEditorScreen(
     val actions = remember { mutableStateListOf<String>() }
     val monitoring = remember { mutableStateListOf<String>() }
     var priority by remember { mutableStateOf("Normal") }
-    var reviewDays by remember { mutableStateOf(7) }
+    var reviewDate by remember { mutableStateOf(defaultReviewDate()) }
     var newAction by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var showApproveDialog by remember { mutableStateOf(false) }
@@ -135,6 +154,7 @@ fun CarePlanEditorScreen(
             actions.clear(); actions.addAll(plan.actions)
             monitoring.clear(); monitoring.addAll(plan.monitoring)
             priority = plan.priority
+            reviewDate = restoredReviewDate(plan)
             seeded = true
         }
     }
@@ -146,11 +166,14 @@ fun CarePlanEditorScreen(
         actions = actions.map { it.trim() }.filter { it.isNotEmpty() },
         monitoring = monitoring.toList(),
         priority = priority,
-        reviewDateLabel = reviewLabel(reviewDays),
-        status = status
+        reviewDateLabel = reviewDateLabel(reviewDate),
+        status = status,
+        reviewDateMillis = reviewDate.atStartOfDay(java.time.ZoneId.systemDefault())
+            .toInstant().toEpochMilli()
     )
 
-    Column(Modifier.fillMaxSize()) {
+    // Phase 25: keyboard + system-bar aware so fields/CTAs stay reachable.
+    Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding()) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 16.dp)) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             Column(Modifier.weight(1f)) {
@@ -184,7 +207,8 @@ fun CarePlanEditorScreen(
             OutlinedTextField(
                 value = reason,
                 onValueChange = { reason = it; error = null },
-                modifier = Modifier.fillMaxWidth().height(110.dp),
+                // Phase 25: heightIn supports large fonts / long text.
+                modifier = Modifier.fillMaxWidth().heightIn(min = 110.dp),
                 placeholder = { Text("Based on repeated mentions of...") },
                 shape = MaterialTheme.shapes.small
             )
@@ -261,13 +285,25 @@ fun CarePlanEditorScreen(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 REVIEW_PRESETS.forEach { days ->
                     FilterChip(
-                        selected = reviewDays == days,
-                        onClick = { reviewDays = days },
+                        selected = reviewDate == LocalDate.now().plusDays(days.toLong()),
+                        onClick = { reviewDate = LocalDate.now().plusDays(days.toLong()) },
                         label = { Text("In $days days") }
                     )
                 }
             }
-            Text("Selected: ${reviewLabel(reviewDays)}", style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
+            TextButton(onClick = {
+                DatePickerDialog(
+                    context,
+                    { _, year, month, day -> reviewDate = LocalDate.of(year, month + 1, day) },
+                    reviewDate.year,
+                    reviewDate.monthValue - 1,
+                    reviewDate.dayOfMonth
+                ).apply {
+                    datePicker.minDate = LocalDate.now().atStartOfDay(java.time.ZoneId.systemDefault())
+                        .toInstant().toEpochMilli()
+                }.show()
+            }) { Text("Choose exact date") }
+            Text("Selected: ${reviewDateLabel(reviewDate)}", style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
 
             PrimaryButton(
                 "Save draft",
@@ -302,9 +338,11 @@ fun CarePlanEditorScreen(
             confirmButton = {
                 TextButton(onClick = {
                     showApproveDialog = false
-                    vm.approve(currentPlan("DRAFT"))
-                    scope.launch { snackbar.showSnackbar("Care plan activated") }
-                    onApproved()
+                    scope.launch {
+                        vm.approve(currentPlan("DRAFT"))
+                        snackbar.showSnackbar("Care plan activated")
+                        onApproved()
+                    }
                 }) { Text("Approve") }
             },
             dismissButton = {

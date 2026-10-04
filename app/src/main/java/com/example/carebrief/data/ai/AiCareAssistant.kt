@@ -75,17 +75,38 @@ class DemoAiCareAssistant : AiCareAssistant {
             }
     }
 
-    override fun generateCarePlanDraft(notes: List<DailyNote>): CarePlanDraft = CarePlanDraft(
-        goal = "Support consistent nutrition and energy monitoring.",
-        reason = "Based on repeated mentions of reduced appetite and fatigue in recent notes.",
-        actions = listOf(
-            "Track meal intake daily.",
-            "Record appetite observations.",
-            "Note changes in energy or mood.",
-            "Escalate significant changes per existing care procedures."
-        ),
-        monitoring = listOf("Nutrition", "Energy", "Mood")
-    )
+    override fun generateCarePlanDraft(notes: List<DailyNote>): CarePlanDraft {
+        val concerns = analyzePotentialConcerns(notes)
+        if (concerns.isEmpty()) return CarePlanDraft(
+            goal = "Support consistent care observations.",
+            reason = "No repeated nutrition, energy, or sleep concerns were identified in the available notes.",
+            actions = listOf(
+                "Continue recording daily observations.",
+                "Review notable changes with the appropriate care professional."
+            ),
+            monitoring = listOf("General observations")
+        )
+
+        val areas = concerns.map { it.category }
+        val evidence = concerns.joinToString("; ") { concern ->
+            "${concern.category.lowercase()} observations in ${concern.evidenceCount} of ${notes.size} notes"
+        }
+        val actions = buildList {
+            if ("Nutrition" in areas) {
+                add("Track meal intake daily.")
+                add("Record appetite observations.")
+            }
+            if ("Energy" in areas) add("Note changes in energy and fatigue.")
+            if ("Sleep" in areas) add("Record sleep quality and interruptions.")
+            add("Review significant changes with the appropriate care professional.")
+        }
+        return CarePlanDraft(
+            goal = "Support monitoring of ${areas.joinToString().lowercase()}.",
+            reason = "Based on recent notes: $evidence.",
+            actions = actions,
+            monitoring = areas
+        )
+    }
 
     override fun generateSuggestedTasks(draft: CarePlanDraft): List<String> =
         generateTaskDrafts(draft).map { it.title }

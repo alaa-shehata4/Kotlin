@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.room.Room
 import com.example.carebrief.core.database.CareBriefDatabase
 import com.example.carebrief.data.DemoCareBriefRepository
+import com.example.carebrief.data.CarePlanStore
 import com.example.carebrief.data.RoomCareBriefRepository
 import com.example.carebrief.data.SettingsStore
 import com.example.carebrief.notifications.ReminderScheduler
@@ -19,6 +20,7 @@ class CareBriefApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        CarePlanStore.shared.restore(applicationContext)
         ensureChannel(this)
         val database = Room.databaseBuilder(
             applicationContext,

@@ -1,11 +1,14 @@
 package com.example.carebrief.data
 
+import android.content.Context
+import android.content.SharedPreferences
 import com.example.carebrief.core.model.DailyNote
 import com.example.carebrief.data.ai.AiCareAssistant
 import com.example.carebrief.data.ai.AiProviders
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.update
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -24,7 +27,8 @@ data class EditableCarePlan(
     val priority: String,
     val reviewDateLabel: String,
     val status: String, // DRAFT or ACTIVE
-    val updatedAtMillis: Long = System.currentTimeMillis()
+    val updatedAtMillis: Long = System.currentTimeMillis(),
+    val reviewDateMillis: Long = 0L
 )
 
 class CarePlanStore(
@@ -32,6 +36,15 @@ class CarePlanStore(
 ) {
     private val flows = mutableMapOf<String, MutableStateFlow<EditableCarePlan?>>()
     private val lock = Any()
+    @Volatile private var preferences: SharedPreferences? = null
+
+    fun restore(context: Context) = synchronized(lock) {
+        preferences = context.getSharedPreferences("carebrief_care_plans", Context.MODE_PRIVATE)
+        preferences?.all?.forEach { (recipientId, raw) ->
+            val plan = runCatching { decodePlan(raw as String) }.getOrNull() ?: return@forEach
+            mutable(recipientId).value = plan
+        }
+    }
 
     private fun mutable(recipientId: String): MutableStateFlow<EditableCarePlan?> = synchronized(lock) {
         flows.getOrPut(recipientId) { MutableStateFlow(null) }
@@ -55,7 +68,9 @@ class CarePlanStore(
             monitoring = draft.monitoring,
             priority = "Normal",
             reviewDateLabel = defaultReviewDate(),
-            status = "DRAFT"
+            status = "DRAFT",
+            reviewDateMillis = LocalDate.now().plusDays(7)
+                .atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
         )
     }
 
@@ -63,19 +78,55 @@ class CarePlanStore(
         observe(recipientId).value ?: defaultFor(recipientId, notes)
 
     fun save(plan: EditableCarePlan) {
-        mutable(plan.recipientId).value = plan.copy(updatedAtMillis = System.currentTimeMillis())
+        val saved = plan.copy(updatedAtMillis = System.currentTimeMillis())
+        mutable(plan.recipientId).value = saved
+        preferences?.edit()?.putString(plan.recipientId, encodePlan(saved))?.apply()
     }
 
     fun approve(recipientId: String) {
-        mutable(recipientId).update {
-            it?.copy(status = "ACTIVE", updatedAtMillis = System.currentTimeMillis())
-        }
+        val plan = mutable(recipientId).value ?: return
+        val approved = plan.copy(status = "ACTIVE", updatedAtMillis = System.currentTimeMillis())
+        mutable(recipientId).value = approved
+        preferences?.edit()?.putString(recipientId, encodePlan(approved))?.apply()
     }
 
     /** Clears all edited plans (used by Settings → Reset demo data). */
     fun clear() = synchronized(lock) {
         flows.values.forEach { it.value = null }
+        preferences?.edit()?.clear()?.apply()
     }
+
+    private fun encodePlan(plan: EditableCarePlan): String = JSONObject().apply {
+        put("recipientId", plan.recipientId)
+        put("goal", plan.goal)
+        put("reason", plan.reason)
+        put("actions", JSONArray(plan.actions))
+        put("monitoring", JSONArray(plan.monitoring))
+        put("priority", plan.priority)
+        put("reviewDateLabel", plan.reviewDateLabel)
+        put("reviewDateMillis", plan.reviewDateMillis)
+        put("status", plan.status)
+        put("updatedAtMillis", plan.updatedAtMillis)
+    }.toString()
+
+    private fun decodePlan(raw: String): EditableCarePlan {
+        val value = JSONObject(raw)
+        return EditableCarePlan(
+            recipientId = value.getString("recipientId"),
+            goal = value.getString("goal"),
+            reason = value.getString("reason"),
+            actions = value.getJSONArray("actions").toStringList(),
+            monitoring = value.getJSONArray("monitoring").toStringList(),
+            priority = value.optString("priority", "Normal"),
+            reviewDateLabel = value.optString("reviewDateLabel", defaultReviewDate()),
+            status = value.optString("status", "DRAFT"),
+            updatedAtMillis = value.optLong("updatedAtMillis", System.currentTimeMillis()),
+            reviewDateMillis = value.optLong("reviewDateMillis", 0L)
+        )
+    }
+
+    private fun JSONArray.toStringList(): List<String> =
+        List(length()) { index -> optString(index) }
 
     private fun defaultReviewDate(): String = try {
         LocalDate.now().plusDays(7).format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))

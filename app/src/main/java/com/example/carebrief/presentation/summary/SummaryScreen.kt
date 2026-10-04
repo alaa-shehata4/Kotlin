@@ -191,15 +191,23 @@ fun SummaryScreen(
                 }
 
                 SectionHeader("Potential areas to review")
-                s.evidence.forEach { item ->
-                    EvidenceCard(
-                        observation = "${item.category} — ${item.observation}",
-                        evidence = "Observed in ${item.matchCount} of ${item.totalNotes} recent notes.",
-                        frequency = item.frequencyLabel,
-                        supportingQuotes = item.supportingNotes.map {
-                            "${it.dayLabel} ${it.timeLabel} · ${it.content}"
-                        }
+                if (s.evidence.isEmpty()) {
+                    Text(
+                        "No potential concerns were identified in the available notes.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = InkSecondary
                     )
+                } else {
+                    s.evidence.forEach { item ->
+                        EvidenceCard(
+                            observation = "${item.category} — ${item.observation}",
+                            evidence = "Observed in ${item.matchCount} of ${item.totalNotes} recent notes.",
+                            frequency = item.frequencyLabel,
+                            supportingQuotes = item.supportingNotes.map {
+                                "${it.dayLabel} ${it.timeLabel} · ${it.content}"
+                            }
+                        )
+                    }
                 }
 
                 PrimaryButton("View suggested care plan", onClick = onViewPlan, modifier = Modifier.fillMaxWidth())
