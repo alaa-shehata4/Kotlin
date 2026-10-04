@@ -14,6 +14,7 @@ object Routes {
     const val SUMMARY = "summary/{recipientId}"
     const val PLAN_DETAIL = "plan/{recipientId}"
     const val PLAN_EDIT = "plan/edit/{recipientId}"
+    const val TASKS = "tasks/{recipientId}"
 
     fun profile(recipientId: String) = "profile/$recipientId"
     fun noteNew(recipientId: String = "sarah") = "note/new?recipientId=$recipientId"
@@ -21,4 +22,5 @@ object Routes {
     fun summary(recipientId: String) = "summary/$recipientId"
     fun planDetail(recipientId: String) = "plan/$recipientId"
     fun planEdit(recipientId: String) = "plan/edit/$recipientId"
+    fun tasks(recipientId: String) = "tasks/$recipientId"
 }

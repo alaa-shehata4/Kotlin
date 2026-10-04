@@ -47,6 +47,7 @@ import com.example.carebrief.presentation.notes.NotesScreen
 import com.example.carebrief.presentation.profile.RecipientProfileScreen
 import com.example.carebrief.presentation.recipients.RecipientsScreen
 import com.example.carebrief.presentation.summary.SummaryScreen
+import com.example.carebrief.presentation.tasks.TasksScreen
 
 private data class Tab(val route: String, val label: String)
 
@@ -125,7 +126,8 @@ fun MainScaffold(onResetOnboarding: () -> Unit) {
             }
             composable(Routes.PLAN) {
                 CarePlanScreen(
-                    onEdit = { id -> nav.navigate(Routes.planEdit(id)) }
+                    onEdit = { id -> nav.navigate(Routes.planEdit(id)) },
+                    onViewTasks = { id -> nav.navigate(Routes.tasks(id)) }
                 )
             }
             composable(
@@ -137,7 +139,19 @@ fun MainScaffold(onResetOnboarding: () -> Unit) {
                     recipientId = id,
                     recipientName = displayName(id),
                     onBack = { nav.popBackStack() },
-                    onEdit = { rid -> nav.navigate(Routes.planEdit(rid)) }
+                    onEdit = { rid -> nav.navigate(Routes.planEdit(rid)) },
+                    onViewTasks = { rid -> nav.navigate(Routes.tasks(rid)) }
+                )
+            }
+            composable(
+                Routes.TASKS,
+                arguments = listOf(navArgument("recipientId") { type = NavType.StringType })
+            ) { entry ->
+                val id = entry.arguments?.getString("recipientId") ?: "sarah"
+                TasksScreen(
+                    recipientId = id,
+                    recipientName = displayName(id),
+                    onBack = { nav.popBackStack() }
                 )
             }
             composable(
@@ -150,7 +164,8 @@ fun MainScaffold(onResetOnboarding: () -> Unit) {
                     onBack = { nav.popBackStack() },
                     onAddNote = { rid -> nav.navigate(Routes.noteNew(rid)) },
                     onAnalyze = { nav.navigate(Routes.analysis(id)) },
-                    onViewPlan = { nav.navigate(Routes.planDetail(id)) }
+                    onViewPlan = { nav.navigate(Routes.planDetail(id)) },
+                    onViewTasks = { rid -> nav.navigate(Routes.tasks(rid)) }
                 )
             }
             composable(

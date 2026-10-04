@@ -28,7 +28,9 @@ data class EditableCarePlan(
     val reviewDateLabel: String,
     val status: String, // DRAFT or ACTIVE
     val updatedAtMillis: Long = System.currentTimeMillis(),
-    val reviewDateMillis: Long = 0L
+    val reviewDateMillis: Long = 0L,
+    val createdAtMillis: Long = System.currentTimeMillis(),
+    val approvedAtMillis: Long = 0L
 )
 
 class CarePlanStore(
@@ -78,14 +80,28 @@ class CarePlanStore(
         observe(recipientId).value ?: defaultFor(recipientId, notes)
 
     fun save(plan: EditableCarePlan) {
-        val saved = plan.copy(updatedAtMillis = System.currentTimeMillis())
+        val previous = mutable(plan.recipientId).value
+        val now = System.currentTimeMillis()
+        val saved = plan.copy(
+            createdAtMillis = previous?.createdAtMillis ?: plan.createdAtMillis.takeIf { it > 0L } ?: now,
+            approvedAtMillis = when {
+                plan.status == "ACTIVE" -> previous?.approvedAtMillis?.takeIf { it > 0L } ?: now
+                else -> previous?.approvedAtMillis ?: plan.approvedAtMillis
+            },
+            updatedAtMillis = now
+        )
         mutable(plan.recipientId).value = saved
         preferences?.edit()?.putString(plan.recipientId, encodePlan(saved))?.apply()
     }
 
     fun approve(recipientId: String) {
         val plan = mutable(recipientId).value ?: return
-        val approved = plan.copy(status = "ACTIVE", updatedAtMillis = System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        val approved = plan.copy(
+            status = "ACTIVE",
+            approvedAtMillis = plan.approvedAtMillis.takeIf { it > 0L } ?: now,
+            updatedAtMillis = now
+        )
         mutable(recipientId).value = approved
         preferences?.edit()?.putString(recipientId, encodePlan(approved))?.apply()
     }
@@ -105,6 +121,8 @@ class CarePlanStore(
         put("priority", plan.priority)
         put("reviewDateLabel", plan.reviewDateLabel)
         put("reviewDateMillis", plan.reviewDateMillis)
+        put("createdAtMillis", plan.createdAtMillis)
+        put("approvedAtMillis", plan.approvedAtMillis)
         put("status", plan.status)
         put("updatedAtMillis", plan.updatedAtMillis)
     }.toString()
@@ -121,7 +139,9 @@ class CarePlanStore(
             reviewDateLabel = value.optString("reviewDateLabel", defaultReviewDate()),
             status = value.optString("status", "DRAFT"),
             updatedAtMillis = value.optLong("updatedAtMillis", System.currentTimeMillis()),
-            reviewDateMillis = value.optLong("reviewDateMillis", 0L)
+            reviewDateMillis = value.optLong("reviewDateMillis", 0L),
+            createdAtMillis = value.optLong("createdAtMillis", value.optLong("updatedAtMillis", System.currentTimeMillis())),
+            approvedAtMillis = value.optLong("approvedAtMillis", 0L)
         )
     }
 

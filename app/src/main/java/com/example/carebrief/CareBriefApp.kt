@@ -7,6 +7,7 @@ import com.example.carebrief.data.DemoCareBriefRepository
 import com.example.carebrief.data.CarePlanStore
 import com.example.carebrief.data.RoomCareBriefRepository
 import com.example.carebrief.data.SettingsStore
+import com.example.carebrief.data.TaskStore
 import com.example.carebrief.notifications.ReminderScheduler
 import com.example.carebrief.notifications.ensureChannel
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +22,7 @@ class CareBriefApp : Application() {
     override fun onCreate() {
         super.onCreate()
         CarePlanStore.shared.restore(applicationContext)
+        TaskStore.shared.restore(applicationContext)
         ensureChannel(this)
         val database = Room.databaseBuilder(
             applicationContext,
