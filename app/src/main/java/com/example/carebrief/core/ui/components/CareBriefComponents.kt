@@ -27,6 +27,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -272,6 +276,57 @@ fun OfflineIndicator() {
             Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = SuccessText, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
             Text("Offline-ready · demo data stored on device", style = MaterialTheme.typography.labelMedium, color = SuccessText)
+        }
+    }
+}
+
+@Composable
+fun EvidenceCard(
+    observation: String,
+    evidence: String,
+    frequency: String,
+    supportingQuotes: List<String>,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    CareBriefCard(modifier = modifier) {
+        Column {
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(Icons.Filled.Info, contentDescription = null, tint = AmberText, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Potential concern", style = MaterialTheme.typography.labelMedium, color = InkSecondary)
+                    Spacer(Modifier.height(2.dp))
+                    Text(observation, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Evidence: $evidence", style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
+                    Spacer(Modifier.height(2.dp))
+                    Text(frequency, style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
+                }
+            }
+            if (supportingQuotes.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                androidx.compose.material3.TextButton(onClick = { expanded = !expanded }) {
+                    Text(if (expanded) "Hide supporting notes" else "Show supporting notes (${supportingQuotes.size})")
+                }
+                if (expanded) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        supportingQuotes.forEach { quote ->
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = MaterialTheme.shapes.extraSmall
+                            ) {
+                                Text(
+                                    "“$quote”",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = InkSecondary,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

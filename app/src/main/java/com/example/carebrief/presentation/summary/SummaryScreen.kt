@@ -12,7 +12,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -20,7 +19,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -34,7 +32,7 @@ import com.example.carebrief.core.ui.components.ChipKind
 import com.example.carebrief.core.ui.components.DraftBadge
 import com.example.carebrief.core.ui.components.EmptyState
 import com.example.carebrief.core.ui.components.ErrorState
-import com.example.carebrief.core.ui.components.InsightCard
+import com.example.carebrief.core.ui.components.EvidenceCard
 import com.example.carebrief.core.ui.components.LoadingRow
 import com.example.carebrief.core.ui.components.PrimaryButton
 import com.example.carebrief.core.ui.components.SectionHeader
@@ -59,7 +57,8 @@ sealed interface SummaryUiState {
         val recipientName: String,
         val observations: List<String>,
         val patterns: List<Pair<String, Int>>,
-        val totalNotes: Int
+        val totalNotes: Int,
+        val evidence: List<InsightEvidence>
     ) : SummaryUiState
 }
 
@@ -77,12 +76,18 @@ class SummaryViewModel(
     ) { notes, _ ->
         try {
             if (notes.isEmpty()) SummaryUiState.Empty(recipientName)
-            else SummaryUiState.Ready(
-                recipientName = recipientName,
-                observations = ai.summarizeNotes(notes),
-                patterns = ai.analyzePatterns(notes).entries.map { it.key to it.value },
-                totalNotes = notes.size
-            )
+            else {
+                val patterns = ai.analyzePatterns(notes).entries.map { it.key to it.value }
+                SummaryUiState.Ready(
+                    recipientName = recipientName,
+                    observations = ai.summarizeNotes(notes),
+                    patterns = patterns,
+                    totalNotes = notes.size,
+                    evidence = patterns.take(3).map { (category, _) ->
+                        buildInsightEvidence(category, notes)
+                    }
+                )
+            }
         } catch (e: Exception) {
             SummaryUiState.Error("We couldn't generate the analysis right now.")
         }
@@ -179,11 +184,14 @@ fun SummaryScreen(
                 }
 
                 SectionHeader("Potential areas to review")
-                s.patterns.take(3).forEach { (category, count) ->
-                    InsightCard(
-                        title = "Potential concern · $category",
-                        description = concernText(category, count, s.totalNotes),
-                        icon = Icons.Filled.Warning
+                s.evidence.forEach { item ->
+                    EvidenceCard(
+                        observation = "${item.category} — ${item.observation}",
+                        evidence = "${item.matchCount} notes over the last ${s.totalNotes} mentioned ${item.category.lowercase()}.",
+                        frequency = item.frequencyLabel,
+                        supportingQuotes = item.supportingNotes.map {
+                            "${it.dayLabel} ${it.timeLabel} · ${it.content}"
+                        }
                     )
                 }
 

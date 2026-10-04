@@ -1,0 +1,32 @@
+package com.example.carebrief.presentation.summary
+
+import com.example.carebrief.core.model.DailyNote
+
+/**
+ * Explainable-insight module. Every important insight carries its
+ * observation, the supporting note excerpts (evidence), and a
+ * count-based frequency — never a fake confidence percentage.
+ */
+data class InsightEvidence(
+    val category: String,
+    val observation: String,
+    val supportingNotes: List<DailyNote>,
+    val matchCount: Int,
+    val totalNotes: Int,
+    val frequencyLabel: String
+)
+
+fun buildInsightEvidence(category: String, notes: List<DailyNote>): InsightEvidence {
+    val matches = notes.filter { note ->
+        note.categories.any { it.equals(category, ignoreCase = true) } ||
+            note.content.contains(category, ignoreCase = true)
+    }
+    return InsightEvidence(
+        category = category,
+        observation = "Repeated mentions of ${category.lowercase()} across recent notes.",
+        supportingNotes = matches,
+        matchCount = matches.size,
+        totalNotes = notes.size,
+        frequencyLabel = evidenceLabel(matches.size, notes.size)
+    )
+}
