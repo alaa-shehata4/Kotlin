@@ -20,7 +20,16 @@ data class DailyNote(
     val timeLabel: String,
     val author: String,
     val content: String,
-    val categories: List<String>
+    val categories: List<String>,
+    val structuredObservations: StructuredObservations? = null,
+    val recordedAtMillis: Long = 0L
+)
+
+data class StructuredObservations(
+    val mood: String? = null,
+    val mobility: String? = null,
+    val appetite: String? = null,
+    val sleep: String? = null
 )
 
 data class AttentionItem(

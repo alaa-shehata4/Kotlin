@@ -16,7 +16,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -32,14 +31,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.carebrief.core.model.CareRecipient
-import com.example.carebrief.core.model.PlanStatus
 import com.example.carebrief.core.ui.components.CareBriefCard
 import com.example.carebrief.core.ui.components.CareRecipientAvatar
+import com.example.carebrief.core.ui.components.CareBriefTextField
 import com.example.carebrief.core.ui.components.ChipKind
 import com.example.carebrief.core.ui.components.EmptyState
 import com.example.carebrief.core.ui.components.LoadingRow
 import com.example.carebrief.core.ui.components.SectionHeader
 import com.example.carebrief.core.ui.components.StatusChip
+import com.example.carebrief.core.ui.components.presentation
 import com.example.carebrief.core.ui.theme.CareBriefSpacing
 import com.example.carebrief.core.ui.theme.InkSecondary
 import com.example.carebrief.data.CareBriefRepository
@@ -49,26 +49,38 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 
 class RecipientsViewModel(
     private val repo: CareBriefRepository = DemoCareBriefRepository.shared
 ) : ViewModel() {
     private val query = MutableStateFlow("")
+    private val retryTick = MutableStateFlow(0)
+    private val _error = MutableStateFlow(false)
+    val error: StateFlow<Boolean> = _error
 
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     val uiState: StateFlow<List<CareRecipient>> =
-        query.debounce(150)
-            .combine(repo.observeRecipients()) { q, all ->
-                val needle = q.trim().lowercase()
-                if (needle.isEmpty()) all else all.filter { it.name.lowercase().contains(needle) }
+        combine(query.debounce(150), retryTick) { q, _ -> q }
+            .flatMapLatest { q ->
+                repo.searchRecipients(q)
+                    .catch {
+                        _error.value = true
+                        emit(emptyList())
+                    }
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun onQueryChange(q: String) { query.value = q }
     fun currentQuery(): StateFlow<String> = query
+    fun retry() {
+        _error.value = false
+        retryTick.value += 1
+    }
 }
 
 @Composable
@@ -78,6 +90,7 @@ fun RecipientsScreen(
 ) {
     val people by vm.uiState.collectAsState()
     val query by vm.currentQuery().collectAsState()
+    val loadError by vm.error.collectAsState()
     var firstLoad by remember { mutableStateOf(true) }
     if (people.isNotEmpty()) firstLoad = false
 
@@ -86,7 +99,7 @@ fun RecipientsScreen(
         Spacer(Modifier.height(4.dp))
         Text("Everyone you support, at a glance.", style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
         Spacer(Modifier.height(12.dp))
-        OutlinedTextField(
+        CareBriefTextField(
             value = query,
             onValueChange = vm::onQueryChange,
             modifier = Modifier.fillMaxWidth(),
@@ -96,7 +109,12 @@ fun RecipientsScreen(
             shape = MaterialTheme.shapes.small
         )
         Spacer(Modifier.height(12.dp))
-        if (firstLoad && people.isEmpty()) {
+        if (loadError && people.isEmpty()) {
+            com.example.carebrief.core.ui.components.ErrorState(
+                "Something went wrong while loading this information.",
+                onRetry = vm::retry
+            )
+        } else if (firstLoad && people.isEmpty()) {
             LoadingRow("Loading people")
         } else if (people.isEmpty()) {
             EmptyState(
@@ -122,12 +140,8 @@ fun RecipientsScreen(
                                 )
                                 Spacer(Modifier.height(6.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    val (label, kind) = when (person.planStatus) {
-                                        PlanStatus.ACTIVE -> "Care plan active" to ChipKind.ACTIVE
-                                        PlanStatus.DRAFT -> "Draft needs review" to ChipKind.DRAFT
-                                        PlanStatus.NONE -> "No care plan" to ChipKind.NEUTRAL
-                                    }
-                                    StatusChip(label, kind)
+                                    val status = person.planStatus.presentation()
+                                    StatusChip(status.listLabel, status.kind)
                                     StatusChip("${person.pendingTasks} pending tasks", ChipKind.NEUTRAL)
                                 }
                                 Spacer(Modifier.height(4.dp))

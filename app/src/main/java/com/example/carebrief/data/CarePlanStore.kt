@@ -2,7 +2,7 @@ package com.example.carebrief.data
 
 import com.example.carebrief.core.model.DailyNote
 import com.example.carebrief.data.ai.AiCareAssistant
-import com.example.carebrief.data.ai.DemoAiCareAssistant
+import com.example.carebrief.data.ai.AiProviders
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -23,11 +23,12 @@ data class EditableCarePlan(
     val monitoring: List<String>,
     val priority: String,
     val reviewDateLabel: String,
-    val status: String // DRAFT or ACTIVE
+    val status: String, // DRAFT or ACTIVE
+    val updatedAtMillis: Long = System.currentTimeMillis()
 )
 
 class CarePlanStore(
-    private val ai: AiCareAssistant = DemoAiCareAssistant()
+    private val ai: AiCareAssistant = AiProviders.current()
 ) {
     private val flows = mutableMapOf<String, MutableStateFlow<EditableCarePlan?>>()
     private val lock = Any()
@@ -62,11 +63,18 @@ class CarePlanStore(
         observe(recipientId).value ?: defaultFor(recipientId, notes)
 
     fun save(plan: EditableCarePlan) {
-        mutable(plan.recipientId).value = plan
+        mutable(plan.recipientId).value = plan.copy(updatedAtMillis = System.currentTimeMillis())
     }
 
     fun approve(recipientId: String) {
-        mutable(recipientId).update { it?.copy(status = "ACTIVE") }
+        mutable(recipientId).update {
+            it?.copy(status = "ACTIVE", updatedAtMillis = System.currentTimeMillis())
+        }
+    }
+
+    /** Clears all edited plans (used by Settings → Reset demo data). */
+    fun clear() = synchronized(lock) {
+        flows.values.forEach { it.value = null }
     }
 
     private fun defaultReviewDate(): String = try {

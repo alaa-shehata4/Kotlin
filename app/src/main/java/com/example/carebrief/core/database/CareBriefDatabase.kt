@@ -8,6 +8,8 @@ import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "recipients")
@@ -31,7 +33,11 @@ data class NoteEntity(
     val timeLabel: String,
     val author: String,
     val content: String,
-    val categoriesCsv: String
+    val categoriesCsv: String,
+    val mood: String? = null,
+    val mobility: String? = null,
+    val appetite: String? = null,
+    val sleep: String? = null
 )
 
 @Dao
@@ -41,6 +47,18 @@ interface RecipientDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(items: List<RecipientEntity>)
+
+    @Query("SELECT COUNT(*) FROM recipients")
+    suspend fun count(): Int
+
+    @Query("UPDATE recipients SET lastNoteLabel = :label WHERE id = :recipientId")
+    suspend fun updateLastNote(recipientId: String, label: String)
+
+    @Query("UPDATE recipients SET planStatus = :status WHERE id = :recipientId")
+    suspend fun updatePlanStatus(recipientId: String, status: String)
+
+    @Query("DELETE FROM recipients")
+    suspend fun clearAll()
 }
 
 @Dao
@@ -48,12 +66,35 @@ interface NoteDao {
     @Query("SELECT * FROM notes WHERE recipientId = :recipientId ORDER BY timestamp DESC")
     fun observeForRecipient(recipientId: String): Flow<List<NoteEntity>>
 
+    @Query("SELECT * FROM notes ORDER BY timestamp DESC")
+    fun observeAll(): Flow<List<NoteEntity>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(note: NoteEntity)
+
+    @Query("SELECT COUNT(*) FROM notes")
+    suspend fun count(): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(items: List<NoteEntity>)
+
+    @Query("DELETE FROM notes")
+    suspend fun clearAll()
 }
 
-@Database(entities = [RecipientEntity::class, NoteEntity::class], version = 1, exportSchema = false)
+@Database(entities = [RecipientEntity::class, NoteEntity::class], version = 2, exportSchema = false)
 abstract class CareBriefDatabase : RoomDatabase() {
     abstract fun recipientDao(): RecipientDao
     abstract fun noteDao(): NoteDao
+
+    companion object {
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE notes ADD COLUMN mood TEXT")
+                db.execSQL("ALTER TABLE notes ADD COLUMN mobility TEXT")
+                db.execSQL("ALTER TABLE notes ADD COLUMN appetite TEXT")
+                db.execSQL("ALTER TABLE notes ADD COLUMN sleep TEXT")
+            }
+        }
+    }
 }

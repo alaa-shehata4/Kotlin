@@ -52,7 +52,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 class NotesViewModel(
@@ -60,18 +63,51 @@ class NotesViewModel(
     private val repo: CareBriefRepository = DemoCareBriefRepository.shared
 ) : ViewModel() {
     private val recipientId = MutableStateFlow(initialRecipientId)
+    private val category = MutableStateFlow<String?>(null)
+    private val day = MutableStateFlow<String?>(null)
+    private val retryTick = MutableStateFlow(0)
+    private val _loadError = MutableStateFlow(false)
+    val loadError: StateFlow<Boolean> = _loadError
 
-    fun selectRecipient(id: String) { recipientId.value = id }
+    fun selectRecipient(id: String) {
+        recipientId.value = id
+        category.value = null
+        day.value = null
+    }
     fun currentRecipient(): StateFlow<String> = recipientId
+    fun selectCategory(c: String?) { category.value = c }
+    fun currentCategory(): StateFlow<String?> = category
+    fun selectDay(d: String?) { day.value = d }
+    fun currentDay(): StateFlow<String?> = day
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val notes: StateFlow<List<DailyNote>?> =
-        recipientId.flatMapLatest { repo.observeNotes(it) }
+        combine(recipientId, retryTick) { id, _ -> id }
+            .flatMapLatest { id ->
+                repo.observeNotes(id)
+                    .catch {
+                        _loadError.value = true
+                        emit(emptyList())
+                    }
+            }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    fun retry() {
+        _loadError.value = false
+        retryTick.value += 1
+    }
+
+    val availableCategories: StateFlow<List<String>> =
+        notes.filterNotNull().map { list -> list.flatMap { it.categories }.distinct().sorted() }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val availableDays: StateFlow<List<String>> =
+        notes.filterNotNull().map { list -> list.map { it.dayLabel }.distinct() }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val groups: StateFlow<List<TimelineGroup>?> =
-        combine(notes) { (list) ->
-            list?.let { TimelineGrouper.group(it) }
+        combine(notes, category, day) { list, c, d ->
+            list?.let { TimelineGrouper.group(filterNotes(it, c, d)) }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     class Factory(private val recipientId: String) : ViewModelProvider.Factory {
@@ -89,7 +125,13 @@ fun NotesScreen(
     vm: NotesViewModel = viewModel(factory = NotesViewModel.Factory(recipientId))
 ) {
     val groups by vm.groups.collectAsState()
+    val allNotes by vm.notes.collectAsState()
+    val loadError by vm.loadError.collectAsState()
     val selectedId by vm.currentRecipient().collectAsState()
+    val categories by vm.availableCategories.collectAsState()
+    val days by vm.availableDays.collectAsState()
+    val selectedCategory by vm.currentCategory().collectAsState()
+    val selectedDay by vm.currentDay().collectAsState()
     val recipientName = remember(selectedId) {
         DemoData.recipients.find { it.id == selectedId }?.name ?: "Sarah Johnson"
     }
@@ -112,13 +154,68 @@ fun NotesScreen(
         }
         Spacer(Modifier.height(8.dp))
         DraftBadge()
+        Spacer(Modifier.height(8.dp))
+        if (categories.isNotEmpty()) {
+            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    FilterChip(
+                        selected = selectedCategory == null,
+                        onClick = { vm.selectCategory(null) },
+                        label = { Text("All topics") }
+                    )
+                }
+                items(categories.size) { i ->
+                    FilterChip(
+                        selected = categories[i] == selectedCategory,
+                        onClick = {
+                            vm.selectCategory(if (categories[i] == selectedCategory) null else categories[i])
+                        },
+                        label = { Text(categories[i]) }
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        if (days.size > 1) {
+            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    FilterChip(
+                        selected = selectedDay == null,
+                        onClick = { vm.selectDay(null) },
+                        label = { Text("All dates") }
+                    )
+                }
+                items(days.size) { i ->
+                    FilterChip(
+                        selected = days[i] == selectedDay,
+                        onClick = { vm.selectDay(if (days[i] == selectedDay) null else days[i]) },
+                        label = { Text(days[i]) }
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+        }
         Spacer(Modifier.height(12.dp))
         when (val list = groups) {
             null -> LoadingRow("Loading notes")
             else -> {
-                if (list.isEmpty()) {
-                    EmptyState("No notes yet.", "Add your first note to start the timeline.", "Add your first note") {
-                        onAddNote(selectedId)
+                if (loadError && list.isEmpty() && allNotes.isNullOrEmpty()) {
+                    com.example.carebrief.core.ui.components.ErrorState(
+                        "Something went wrong while loading this information.",
+                        onRetry = vm::retry
+                    )
+                } else if (list.isEmpty()) {
+                    val filtering = selectedCategory != null || selectedDay != null
+                    if (filtering && !allNotes.isNullOrEmpty()) {
+                        EmptyState(
+                            "No notes match these filters.",
+                            "Try a different topic or date.",
+                            "Clear filters"
+                        ) { vm.selectCategory(null); vm.selectDay(null) }
+                    } else {
+                        EmptyState("No notes yet.", "Add your first note to start the timeline.", "Add your first note") {
+                            onAddNote(selectedId)
+                        }
                     }
                 } else {
                     LazyColumn(
@@ -148,6 +245,8 @@ fun NotesScreen(
         SecondaryButton("Add daily note", onClick = { onAddNote(selectedId) }, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
         PrimaryButton("Analyze recent notes", onClick = { onAnalyze(selectedId) }, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        com.example.carebrief.core.network.OfflineBanner()
     }
 }
 
@@ -188,7 +287,7 @@ private fun TimelineEntry(isNew: Boolean, note: DailyNote) {
                 )
             }
             Spacer(Modifier.height(6.dp))
-            NoteCard(note.dayLabel, note.timeLabel, note.author, note.content, note.categories)
+            NoteCard(note.dayLabel, note.timeLabel, note.author, note.content, note.categories, note.structuredObservations)
         }
     }
 }

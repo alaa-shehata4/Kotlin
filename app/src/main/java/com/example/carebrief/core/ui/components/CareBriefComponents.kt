@@ -21,11 +21,17 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +57,7 @@ import com.example.carebrief.core.ui.theme.SuccessBorder
 import com.example.carebrief.core.ui.theme.SuccessContainer
 import com.example.carebrief.core.ui.theme.SuccessText
 import com.example.carebrief.core.ui.theme.TealPrimary
+import com.example.carebrief.core.model.StructuredObservations
 
 @Composable
 fun CareBriefCard(
@@ -65,6 +72,68 @@ fun CareBriefCard(
     ) {
         Box(Modifier.padding(CareBriefSpacing.md)) { content() }
     }
+}
+
+@Composable
+fun CareBriefTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: @Composable (() -> Unit)? = null,
+    leadingIcon: @Composable (() -> Unit)? = null,
+    singleLine: Boolean = false,
+    shape: androidx.compose.ui.graphics.Shape = MaterialTheme.shapes.small
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier,
+        placeholder = placeholder,
+        leadingIcon = leadingIcon,
+        singleLine = singleLine,
+        shape = shape
+    )
+}
+
+@Composable
+fun CareBriefDialog(
+    title: String,
+    onDismissRequest: () -> Unit,
+    onConfirm: () -> Unit,
+    content: @Composable () -> Unit,
+    confirmLabel: String = "Confirm",
+    dismissLabel: String = "Cancel"
+) {
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        title = { Text(title) },
+        text = content,
+        confirmButton = { TextButton(onClick = onConfirm) { Text(confirmLabel) } },
+        dismissButton = { TextButton(onClick = onDismissRequest) { Text(dismissLabel) } }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CareBriefBottomSheet(
+    onDismissRequest: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismissRequest) { content() }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CareBriefTopAppBar(
+    title: String,
+    navigationIcon: @Composable () -> Unit = {},
+    actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {}
+) {
+    TopAppBar(
+        title = { Text(title) },
+        navigationIcon = navigationIcon,
+        actions = actions
+    )
 }
 
 @Composable
@@ -192,7 +261,8 @@ fun NoteCard(
     timeLabel: String,
     author: String,
     content: String,
-    categories: List<String>
+    categories: List<String>,
+    structuredObservations: StructuredObservations? = null
 ) {
     CareBriefCard {
         Column {
@@ -203,6 +273,16 @@ fun NoteCard(
             }
             Spacer(Modifier.height(8.dp))
             Text(content, style = MaterialTheme.typography.bodyLarge)
+            val structured = listOfNotNull(
+                structuredObservations?.mood?.let { "Mood: $it" },
+                structuredObservations?.mobility?.let { "Mobility: $it" },
+                structuredObservations?.appetite?.let { "Appetite: $it" },
+                structuredObservations?.sleep?.let { "Sleep: $it" }
+            )
+            if (structured.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text(structured.joinToString(" · "), style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
+            }
             if (categories.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -270,19 +350,35 @@ fun LoadingRow(label: String = "Loading") {
 }
 
 @Composable
-fun OfflineIndicator() {
-    Surface(color = SageContainer, shape = MaterialTheme.shapes.extraSmall) {
+fun AIProcessingIndicator(label: String, modifier: Modifier = Modifier) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = TealPrimary)
+        Spacer(Modifier.width(10.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = InkSecondary
+        )
+    }
+}
+
+@Composable
+fun OfflineIndicator(
+    text: String = "Offline-ready · demo data stored on device",
+    modifier: Modifier = Modifier
+) {
+    Surface(color = SageContainer, shape = MaterialTheme.shapes.extraSmall, modifier = modifier) {
         Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = SuccessText, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Offline-ready · demo data stored on device", style = MaterialTheme.typography.labelMedium, color = SuccessText)
+            Text(text, style = MaterialTheme.typography.labelMedium, color = SuccessText)
         }
     }
 }
 
 @Composable
-fun EvidenceCard(
-    observation: String,
+fun EvidenceCard(    observation: String,
     evidence: String,
     frequency: String,
     supportingQuotes: List<String>,
@@ -326,6 +422,52 @@ fun EvidenceCard(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun TaskCard(
+    title: String,
+    category: String,
+    frequency: String,
+    dueLabel: String,
+    priority: String,
+    completed: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    CareBriefCard(modifier = modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.Checkbox(
+                checked = completed,
+                onCheckedChange = { onToggle() }
+            )
+            Spacer(Modifier.width(4.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = if (completed) {
+                        MaterialTheme.typography.bodyLarge.copy(
+                            textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough
+                        )
+                    } else MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (completed) FontWeight.Normal else FontWeight.Medium,
+                    color = if (completed) InkSecondary else MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    StatusChip(category, ChipKind.INFO)
+                    StatusChip(frequency, ChipKind.NEUTRAL)
+                    if (priority == "High") StatusChip("High priority", ChipKind.CONCERN)
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (completed) "Completed · tap to undo" else "Due: $dueLabel",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = InkSecondary
+                )
             }
         }
     }

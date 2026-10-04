@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,7 +33,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.carebrief.core.model.CareRecipient
 import com.example.carebrief.core.model.DailyNote
-import com.example.carebrief.core.model.PlanStatus
+import com.example.carebrief.core.model.CarePlanDraft
 import com.example.carebrief.core.ui.components.CareBriefCard
 import com.example.carebrief.core.ui.components.CareRecipientAvatar
 import com.example.carebrief.core.ui.components.ChipKind
@@ -45,35 +46,113 @@ import com.example.carebrief.core.ui.components.PrimaryButton
 import com.example.carebrief.core.ui.components.SecondaryButton
 import com.example.carebrief.core.ui.components.SectionHeader
 import com.example.carebrief.core.ui.components.StatusChip
+import com.example.carebrief.core.ui.components.TaskCard
+import com.example.carebrief.core.ui.components.presentation
 import com.example.carebrief.core.ui.theme.CareBriefSpacing
 import com.example.carebrief.core.ui.theme.InkSecondary
 import com.example.carebrief.data.CareBriefRepository
 import com.example.carebrief.data.DemoCareBriefRepository
-import com.example.carebrief.data.ai.DemoAiCareAssistant
+import com.example.carebrief.data.CarePlanStore
+import com.example.carebrief.data.EditableCarePlan
+import com.example.carebrief.data.TaskStore
+import com.example.carebrief.data.CareTask
+import com.example.carebrief.data.ai.AiProviders
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 data class ProfileUiState(
     val recipient: CareRecipient? = null,
-    val notes: List<DailyNote> = emptyList()
+    val notes: List<DailyNote> = emptyList(),
+    val carePlan: EditableCarePlan? = null,
+    val hasSavedCarePlan: Boolean = false,
+    val tasks: List<CareTask> = emptyList(),
+    val activity: List<ProfileActivityItem> = emptyList()
 )
+
+data class ProfileActivityItem(val timestamp: Long, val title: String, val detail: String)
 
 class RecipientProfileViewModel(
     private val recipientId: String,
     private val repo: CareBriefRepository = DemoCareBriefRepository.shared
 ) : ViewModel() {
-    val uiState = combine(
+    private val plans = CarePlanStore.shared
+    private val tasks = TaskStore.shared
+    private val profile = combine(
         repo.observeRecipient(recipientId),
         repo.observeNotes(recipientId)
     ) { recipient, notes -> ProfileUiState(recipient, notes) }
+    val uiState = combine(profile, plans.observe(recipientId), tasks.observe(recipientId)) { state, savedPlan, currentTasks ->
+        val plan = savedPlan ?: plans.defaultFor(recipientId, state.notes)
+        val activity = buildList {
+            state.notes.forEach { note ->
+                add(ProfileActivityItem(noteTimestamp(note), "Daily note added", "${note.author} · ${note.categories.joinToString()}"))
+            }
+            if (savedPlan != null) add(ProfileActivityItem(
+                savedPlan.updatedAtMillis,
+                "Care plan ${savedPlan.status.lowercase()}",
+                savedPlan.goal
+            ))
+            currentTasks.forEach { task ->
+                add(ProfileActivityItem(
+                    task.updatedAtMillis,
+                    if (task.completed) "Task completed" else "Task pending",
+                    task.title
+                ))
+            }
+        }.sortedByDescending(ProfileActivityItem::timestamp).take(8)
+        state.copy(
+            carePlan = plan,
+            hasSavedCarePlan = savedPlan != null,
+            tasks = currentTasks,
+            activity = activity
+        )
+    }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ProfileUiState())
+
+    fun ensureTasks(plan: EditableCarePlan?) {
+        if (plan == null) return
+        tasks.ensureGenerated(
+            recipientId,
+            CarePlanDraft(plan.goal, plan.reason, plan.actions, plan.monitoring)
+        )
+    }
+
+    fun toggleTask(taskId: String) = tasks.toggle(recipientId, taskId)
 
     class Factory(private val recipientId: String) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
             RecipientProfileViewModel(recipientId) as T
     }
+}
+
+private fun noteTimestamp(note: DailyNote): Long {
+    if (note.recordedAtMillis > 0L) return note.recordedAtMillis
+    val label = note.dayLabel.lowercase()
+    val daysAgo = when (label) {
+        "today" -> 0L
+        "yesterday" -> 1L
+        else -> Regex("(\\d+) days ago").matchEntire(label)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+    }
+    val time = runCatching { LocalTime.parse(note.timeLabel, DateTimeFormatter.ofPattern("HH:mm")) }
+        .getOrDefault(LocalTime.NOON)
+    return LocalDate.now().minusDays(daysAgo).atTime(time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+}
+
+private fun activityTime(timestamp: Long): String {
+    val dateTime = Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault())
+    val date = when (dateTime.toLocalDate()) {
+        LocalDate.now() -> "Today"
+        LocalDate.now().minusDays(1) -> "Yesterday"
+        else -> dateTime.format(DateTimeFormatter.ofPattern("d MMM"))
+    }
+    return "$date · ${dateTime.format(DateTimeFormatter.ofPattern("HH:mm"))}"
 }
 
 @Composable
@@ -83,11 +162,13 @@ fun RecipientProfileScreen(
     onAddNote: (String) -> Unit,
     onAnalyze: () -> Unit,
     onViewPlan: () -> Unit,
+    onViewTasks: (String) -> Unit = {},
     vm: RecipientProfileViewModel = viewModel(factory = RecipientProfileViewModel.Factory(recipientId))
 ) {
     val state by vm.uiState.collectAsState()
     val scroll = rememberScrollState()
-    val ai = remember { DemoAiCareAssistant() }
+    val ai = remember { AiProviders.current() }
+    LaunchedEffect(state.carePlan) { vm.ensureTasks(state.carePlan) }
 
     Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(CareBriefSpacing.md)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -118,13 +199,9 @@ fun RecipientProfileScreen(
                     )
                     Spacer(Modifier.height(6.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val (label, kind) = when (person.planStatus) {
-                            PlanStatus.ACTIVE -> "Care plan active" to ChipKind.ACTIVE
-                            PlanStatus.DRAFT -> "Draft — review required" to ChipKind.DRAFT
-                            PlanStatus.NONE -> "No care plan" to ChipKind.NEUTRAL
-                        }
-                        StatusChip(label, kind)
-                        StatusChip("${person.pendingTasks} pending tasks", ChipKind.NEUTRAL)
+                        val status = person.planStatus.presentation()
+                        StatusChip(status.profileLabel, status.kind)
+                        StatusChip("${state.tasks.count { !it.completed }} pending tasks", ChipKind.NEUTRAL)
                     }
                 }
             }
@@ -140,7 +217,7 @@ fun RecipientProfileScreen(
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 state.notes.take(3).forEach { note ->
-                    NoteCard(note.dayLabel, note.timeLabel, note.author, note.content, note.categories)
+                    NoteCard(note.dayLabel, note.timeLabel, note.author, note.content, note.categories, note.structuredObservations)
                 }
             }
         }
@@ -150,15 +227,20 @@ fun RecipientProfileScreen(
         SectionHeader("Current concerns")
         DraftBadge()
         Spacer(Modifier.height(8.dp))
-        val patterns = ai.analyzePatterns(state.notes)
-        if (patterns.isEmpty()) {
-            Text("Not enough notes yet to suggest areas to review.", style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
+        val concerns = ai.analyzePotentialConcerns(state.notes)
+        if (concerns.isEmpty()) {
+            Text(
+                if (state.notes.isEmpty()) "Not enough notes yet to suggest areas to review."
+                else "No potential concerns were identified in the recent notes.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = InkSecondary
+            )
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                patterns.entries.take(2).forEach { (category, count) ->
+                concerns.forEach { concern ->
                     InsightCard(
-                        title = "Potential area to review · $category",
-                        description = "Observed in $count of ${state.notes.size} recent notes. May warrant additional observation.",
+                        title = "Potential area to review · ${concern.category}",
+                        description = "Relevant observations appeared in ${concern.evidenceCount} of ${state.notes.size} recent notes. Review suggested.",
                         icon = Icons.Filled.Warning
                     )
                 }
@@ -170,12 +252,18 @@ fun RecipientProfileScreen(
         SectionHeader("Care plan")
         CareBriefCard {
             Column {
-                val planLabel = when (person.planStatus) {
-                    PlanStatus.ACTIVE -> "Active care plan"
-                    PlanStatus.DRAFT -> "Draft care plan awaiting review"
-                    PlanStatus.NONE -> "No care plan yet"
+                val status = person.planStatus.presentation()
+                Text(status.profileLabel, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                val plan = state.carePlan
+                if (plan != null && person.planStatus != com.example.carebrief.core.model.PlanStatus.NONE) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("Current goal", style = MaterialTheme.typography.labelMedium, color = InkSecondary)
+                    Text(plan.goal, style = MaterialTheme.typography.bodyLarge)
+                    Text(plan.reason, style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
+                } else if (!state.hasSavedCarePlan) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("No current goal yet.", style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
                 }
-                Text(planLabel, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "Based on recorded notes. Review before using. Not a diagnosis.",
@@ -189,23 +277,39 @@ fun RecipientProfileScreen(
         Spacer(Modifier.height(12.dp))
 
         // Tasks
-        SectionHeader("Tasks")
+        SectionHeader("Tasks", actionLabel = "View all", onAction = { onViewTasks(person.id) })
         CareBriefCard {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("${person.pendingTasks} pending tasks", style = MaterialTheme.typography.titleMedium)
-                Text("Today · meal intake logs and observations", style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("${state.tasks.count { !it.completed }} pending · ${state.tasks.count { it.completed }} completed", style = MaterialTheme.typography.titleMedium)
+                state.tasks.forEach { task ->
+                    TaskCard(
+                        title = task.title,
+                        category = task.category,
+                        frequency = task.frequency,
+                        dueLabel = task.dueLabel,
+                        priority = task.priority,
+                        completed = task.completed,
+                        onToggle = { vm.toggleTask(task.id) }
+                    )
+                }
+                SecondaryButton("Open tasks", onClick = { onViewTasks(person.id) }, modifier = Modifier.fillMaxWidth())
             }
         }
         Spacer(Modifier.height(12.dp))
 
         // Activity
-        SectionHeader("Activity")
-        CareBriefCard {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                state.notes.take(4).forEach { note ->
-                    Column {
-                        Text("Note · ${note.dayLabel} ${note.timeLabel}", style = MaterialTheme.typography.titleMedium)
-                        Text(note.categories.joinToString(", "), style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
+        SectionHeader("Activity · most recent first")
+        if (state.activity.isEmpty()) {
+            Text("No activity recorded yet.", style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.activity.forEach { item ->
+                    CareBriefCard {
+                        Column {
+                            Text(item.title, style = MaterialTheme.typography.titleMedium)
+                            Text(item.detail, style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
+                            Text(activityTime(item.timestamp), style = MaterialTheme.typography.labelMedium, color = InkSecondary)
+                        }
                     }
                 }
             }

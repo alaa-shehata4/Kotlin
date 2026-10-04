@@ -23,12 +23,12 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,6 +46,7 @@ import com.example.carebrief.core.ui.theme.InkSecondary
 import com.example.carebrief.data.CareBriefRepository
 import com.example.carebrief.data.DemoCareBriefRepository
 import com.example.carebrief.data.NoteValidator
+import com.example.carebrief.core.model.StructuredObservations
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -65,14 +66,20 @@ class NoteEditorViewModel(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
 
-    fun save(recipientId: String, content: String, categories: List<String>, author: String) {
+    fun save(
+        recipientId: String,
+        content: String,
+        categories: List<String>,
+        author: String,
+        structuredObservations: StructuredObservations?
+    ) {
         when (val v = NoteValidator.validate(content, categories)) {
             is NoteValidator.Result.Invalid -> { _error.value = v.message; return }
             NoteValidator.Result.Valid -> Unit
         }
         viewModelScope.launch {
             try {
-                repo.addNote(recipientId, content, categories, author)
+                repo.addNote(recipientId, content, categories, author, structuredObservations)
                 _saved.value = true
             } catch (e: IllegalArgumentException) {
                 _error.value = e.message
@@ -80,7 +87,6 @@ class NoteEditorViewModel(
         }
     }
 
-    fun consumeSaved() { _saved.value = false }
     fun clearError() { _error.value = null }
 }
 
@@ -101,18 +107,14 @@ fun NoteEditorScreen(
     var sleep by remember { mutableStateOf<String?>(null) }
     val saved by vm.saved.collectAsState()
     val error by vm.error.collectAsState()
-    val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val scroll = rememberScrollState()
     val nowLabel = remember {
         LocalDateTime.now().format(DateTimeFormatter.ofPattern("EEEE, d MMMM · HH:mm"))
     }
 
-    if (saved) {
-        scope.launch {
-            snackbar.showSnackbar("Note saved")
-            vm.consumeSaved()
-        }
+    LaunchedEffect(saved) {
+        if (saved) snackbar.showSnackbar("Note saved")
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -162,16 +164,8 @@ fun NoteEditorScreen(
             }
 
             PrimaryButton(
-                "Save note",
+                if (saved) "Note saved" else "Save note",
                 onClick = {
-                    val structured = listOfNotNull(
-                        mood?.let { "Mood: $it" },
-                        mobility?.let { "Mobility: $it" },
-                        appetite?.let { "Appetite: $it" },
-                        sleep?.let { "Sleep: $it" }
-                    )
-                    val fullText = if (structured.isEmpty()) observation
-                    else observation.trim() + "\n" + structured.joinToString(" · ")
                     val cats = buildList {
                         addAll(selected)
                         if (appetite != null && !contains("Nutrition")) add("Nutrition")
@@ -179,9 +173,12 @@ fun NoteEditorScreen(
                         if (mood != null && !contains("Mood")) add("Mood")
                         if (mobility != null && !contains("Mobility")) add("Mobility")
                     }
-                    vm.save(recipientId, fullText, cats, "Caregiver")
+                    val structured = StructuredObservations(mood, mobility, appetite, sleep)
+                        .takeIf { mood != null || mobility != null || appetite != null || sleep != null }
+                    vm.save(recipientId, observation, cats, "Caregiver", structured)
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !saved
             )
             if (saved) {
                 SecondaryButton("Analyze recent notes", onSavedAnalyze, Modifier.fillMaxWidth())
