@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.carebrief.core.ui.components.CareBriefCard
 import com.example.carebrief.core.ui.components.DraftBadge
+import com.example.carebrief.core.ui.components.AIProcessingIndicator
 import com.example.carebrief.core.ui.theme.CareBriefSpacing
 import com.example.carebrief.core.ui.theme.InkSecondary
 import com.example.carebrief.core.ui.theme.SuccessText
@@ -45,14 +47,16 @@ fun AnalysisScreen(
 ) {
     var currentStage by remember { mutableIntStateOf(0) }
     var done by remember { mutableIntStateOf(0) }
+    var cancelled by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(cancelled) {
+        if (cancelled) return@LaunchedEffect
         AnalysisStages.stages.forEachIndexed { index, stage ->
             currentStage = index
             delay(stage.durationMs)
             done = index + 1
         }
-        onComplete()
+        if (!cancelled) onComplete()
     }
 
     val progress by animateFloatAsState(
@@ -86,27 +90,28 @@ fun AnalysisScreen(
         CareBriefCard {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 AnalysisStages.stages.forEachIndexed { index, stage ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        when {
-                            index < done -> Icon(
-                                Icons.Filled.CheckCircle,
-                                contentDescription = "Done",
-                                tint = SuccessText,
-                                modifier = Modifier.size(22.dp)
+                    if (index == currentStage) {
+                        AIProcessingIndicator(stage.label)
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (index < done) {
+                                Icon(
+                                    Icons.Filled.CheckCircle,
+                                    contentDescription = "Done",
+                                    tint = SuccessText,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            } else {
+                                Spacer(Modifier.size(22.dp))
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                stage.label,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Normal,
+                                color = if (index < done) MaterialTheme.colorScheme.onSurface else InkSecondary
                             )
-                            index == currentStage -> CircularProgressIndicator(
-                                modifier = Modifier.size(22.dp),
-                                strokeWidth = 2.dp
-                            )
-                            else -> Spacer(Modifier.size(22.dp))
                         }
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            stage.label,
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = if (index == currentStage) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (index <= currentStage) MaterialTheme.colorScheme.onSurface else InkSecondary
-                        )
                     }
                 }
             }
@@ -123,6 +128,9 @@ fun AnalysisScreen(
             color = InkSecondary
         )
         Spacer(Modifier.height(8.dp))
-        TextButton(onClick = onCancel) { Text("Continue reviewing notes") }
+        TextButton(onClick = {
+            cancelled = true
+            onCancel()
+        }) { Text("Continue reviewing notes") }
     }
 }

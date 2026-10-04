@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -135,16 +136,34 @@ fun NotesScreen(
     val recipientName = remember(selectedId) {
         DemoData.recipients.find { it.id == selectedId }?.name ?: "Sarah Johnson"
     }
-    var analyzedIds by remember { mutableStateOf(setOf<String>()) }
+    val analyzedIds by TimelineAnalysisHistory.analyzedNoteIds.collectAsState()
 
-    Column(Modifier.fillMaxSize().padding(CareBriefSpacing.md)) {
-        Text("Daily notes", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+    Column(
+        Modifier.fillMaxSize()
+            .padding(CareBriefSpacing.md)
+            .navigationBarsPadding()
+    ) {
+        Text(
+            "Daily notes",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.SemiBold,
+            softWrap = true
+        )
         Spacer(Modifier.height(4.dp))
-        Text("$recipientName · recent observations", style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
+        Text(
+            "$recipientName · recent observations",
+            style = MaterialTheme.typography.bodyMedium,
+            color = InkSecondary,
+            softWrap = true
+        )
         Spacer(Modifier.height(8.dp))
-        // Recipient switcher keeps the timeline useful for all demo people.
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            DemoData.recipients.forEach { person ->
+        // Phase 25: LazyRow so small phones / large fonts don't overflow.
+        androidx.compose.foundation.lazy.LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(DemoData.recipients.size) { index ->
+                val person = DemoData.recipients[index]
                 FilterChip(
                     selected = person.id == selectedId,
                     onClick = { vm.selectRecipient(person.id) },
@@ -229,15 +248,13 @@ fun NotesScreen(
                             group.notes.forEach { note ->
                                 item(key = note.id) {
                                     TimelineEntry(
-                                        isNew = note.id !in analyzedIds && group.dayLabel == "Today",
+                                        isAnalyzed = note.id in analyzedIds,
                                         note = note
                                     )
                                 }
                             }
                         }
                     }
-                    // Mark visible notes as included once rendered (demo AI status).
-                    analyzedIds = list.flatMap { it.notes }.map { it.id }.toSet()
                 }
             }
         }
@@ -264,7 +281,7 @@ private fun TimelineDayHeader(day: String, subtitle: String) {
 }
 
 @Composable
-private fun TimelineEntry(isNew: Boolean, note: DailyNote) {
+private fun TimelineEntry(isAnalyzed: Boolean, note: DailyNote) {
     Row {
         // Chronology rail.
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 14.dp)) {
@@ -282,8 +299,8 @@ private fun TimelineEntry(isNew: Boolean, note: DailyNote) {
                 )
                 Spacer(Modifier.width(8.dp))
                 StatusChip(
-                    if (isNew) "New — included next run" else "Included in draft",
-                    if (isNew) ChipKind.DRAFT else ChipKind.ACTIVE
+                    if (isAnalyzed) "Included in last analysis" else "Not analyzed",
+                    if (isAnalyzed) ChipKind.ACTIVE else ChipKind.NEUTRAL
                 )
             }
             Spacer(Modifier.height(6.dp))

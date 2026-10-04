@@ -7,15 +7,11 @@ fun evidenceLabel(count: Int, total: Int): String =
 /** Cautious concern line for a category. Never a diagnosis. */
 fun concernText(category: String, count: Int, total: Int): String = when (category.lowercase()) {
     "nutrition", "appetite" ->
-        "Reduced appetite was noted repeatedly (${evidenceLabel(count, total).trimEnd('.').lowercase()}). " +
-            "Consider reviewing the pattern with the appropriate care professional if concerns persist."
+        "Reduced appetite observations appeared in $count of $total recent notes and may warrant review with the appropriate care professional."
     "energy", "fatigue" ->
-        "Fatigue was mentioned repeatedly (${evidenceLabel(count, total).trimEnd('.').lowercase()}). " +
-            "Continued observation of energy and rest may be useful."
+        "Fatigue or tiredness appeared in $count of $total recent notes and may be useful to discuss with the care team."
     "sleep" ->
-        "Interrupted sleep was reported more than once (${evidenceLabel(count, total).trimEnd('.').lowercase()}). " +
-            "Keeping track of sleep patterns may help future reviews."
+        "Interrupted or restless sleep appeared in $count of $total recent notes and may warrant continued tracking."
     else ->
-        "$category came up more than once (${evidenceLabel(count, total).trimEnd('.').lowercase()}). " +
-            "It may be worth keeping an eye on this area."
+        "$category observations appeared in $count of $total recent notes and may warrant review."
 }

@@ -16,14 +16,15 @@ data class InsightEvidence(
     val frequencyLabel: String
 )
 
-fun buildInsightEvidence(category: String, notes: List<DailyNote>): InsightEvidence {
-    val matches = notes.filter { note ->
-        note.categories.any { it.equals(category, ignoreCase = true) } ||
-            note.content.contains(category, ignoreCase = true)
-    }
+fun buildInsightEvidence(
+    category: String,
+    notes: List<DailyNote>,
+    supportingNoteIds: List<String>
+): InsightEvidence {
+    val matches = notes.filter { it.id in supportingNoteIds }
     return InsightEvidence(
         category = category,
-        observation = "Repeated mentions of ${category.lowercase()} across recent notes.",
+        observation = concernText(category, matches.size, notes.size),
         supportingNotes = matches,
         matchCount = matches.size,
         totalNotes = notes.size,

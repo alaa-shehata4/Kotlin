@@ -42,7 +42,7 @@ import com.example.carebrief.core.ui.theme.InkSecondary
 import com.example.carebrief.data.CareBriefRepository
 import com.example.carebrief.data.DemoCareBriefRepository
 import com.example.carebrief.data.ai.AiCareAssistant
-import com.example.carebrief.data.ai.DemoAiCareAssistant
+import com.example.carebrief.data.ai.AiProviders
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -66,7 +66,7 @@ class SummaryViewModel(
     private val recipientId: String,
     private val recipientName: String,
     private val repo: CareBriefRepository = DemoCareBriefRepository.shared,
-    private val ai: AiCareAssistant = DemoAiCareAssistant()
+    private val ai: AiCareAssistant = AiProviders.current()
 ) : ViewModel() {
     private val retryTick = MutableStateFlow(0)
 
@@ -78,13 +78,14 @@ class SummaryViewModel(
             if (notes.isEmpty()) SummaryUiState.Empty(recipientName)
             else {
                 val patterns = ai.analyzePatterns(notes).entries.map { it.key to it.value }
+                val concerns = ai.analyzePotentialConcerns(notes)
                 SummaryUiState.Ready(
                     recipientName = recipientName,
                     observations = ai.summarizeNotes(notes),
                     patterns = patterns,
                     totalNotes = notes.size,
-                    evidence = patterns.take(3).map { (category, _) ->
-                        buildInsightEvidence(category, notes)
+                    evidence = concerns.map { concern ->
+                        buildInsightEvidence(concern.category, notes, concern.supportingNoteIds)
                     }
                 )
             }
@@ -134,8 +135,14 @@ fun SummaryScreen(
                 Spacer(Modifier.height(8.dp))
                 Text("You can also continue reviewing notes.", style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
             }
-            is SummaryUiState.Ready -> Column(
-                Modifier.verticalScroll(scroll).padding(CareBriefSpacing.md),
+            is SummaryUiState.Ready -> androidx.compose.animation.AnimatedVisibility(
+                visible = true,
+                enter = androidx.compose.animation.fadeIn(
+                    animationSpec = androidx.compose.animation.core.tween(300)
+                )
+            ) {
+                Column(
+                    Modifier.verticalScroll(scroll).padding(CareBriefSpacing.md),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
@@ -187,7 +194,7 @@ fun SummaryScreen(
                 s.evidence.forEach { item ->
                     EvidenceCard(
                         observation = "${item.category} — ${item.observation}",
-                        evidence = "${item.matchCount} notes over the last ${s.totalNotes} mentioned ${item.category.lowercase()}.",
+                        evidence = "Observed in ${item.matchCount} of ${item.totalNotes} recent notes.",
                         frequency = item.frequencyLabel,
                         supportingQuotes = item.supportingNotes.map {
                             "${it.dayLabel} ${it.timeLabel} · ${it.content}"
@@ -197,6 +204,7 @@ fun SummaryScreen(
 
                 PrimaryButton("View suggested care plan", onClick = onViewPlan, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(4.dp))
+                }
             }
         }
     }

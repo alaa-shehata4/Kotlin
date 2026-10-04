@@ -14,7 +14,11 @@ data class TaskDraft(
     val frequency: String
 )
 
-data class PotentialConcern(val category: String, val evidenceCount: Int)
+data class PotentialConcern(
+    val category: String,
+    val evidenceCount: Int,
+    val supportingNoteIds: List<String> = emptyList()
+)
 
 interface AiCareAssistant {
     fun summarizeNotes(notes: List<DailyNote>): List<String>
@@ -29,11 +33,16 @@ interface AiCareAssistant {
 }
 
 class DemoAiCareAssistant : AiCareAssistant {
-    override fun summarizeNotes(notes: List<DailyNote>): List<String> = listOf(
-        "Appetite appears lower across several recent notes.",
-        "Increased fatigue was mentioned repeatedly.",
-        "Sleep was reported as interrupted on multiple occasions."
-    )
+    override fun summarizeNotes(notes: List<DailyNote>): List<String> =
+        analyzePotentialConcerns(notes).map { concern ->
+            val evidence = "Observed in ${concern.evidenceCount} of ${notes.size} recent notes."
+            when (concern.category) {
+                "Nutrition" -> "Reduced appetite observations may warrant review. $evidence"
+                "Energy" -> "Fatigue or tiredness was observed and may be useful to discuss with the care team. $evidence"
+                "Sleep" -> "Interrupted or restless sleep was observed and may warrant continued tracking. $evidence"
+                else -> "${concern.category} observations may warrant review. $evidence"
+            }
+        }
 
     override fun analyzePatterns(notes: List<DailyNote>): Map<String, Int> {
         val counts = mutableMapOf<String, Int>()
@@ -44,24 +53,26 @@ class DemoAiCareAssistant : AiCareAssistant {
     }
 
     override fun analyzePotentialConcerns(notes: List<DailyNote>): List<PotentialConcern> {
-        fun countWhen(predicate: (DailyNote) -> Boolean) = notes.count(predicate)
-        val nutrition = countWhen { note ->
+        fun matching(predicate: (DailyNote) -> Boolean) = notes.filter(predicate)
+        val nutrition = matching { note ->
             val text = note.content.lowercase()
             note.structuredObservations?.appetite in listOf("Reduced", "Poor") ||
                 listOf("reduced", "very little", "untouched", "not very hungry", "wasn't hungry").any { text.contains(it) }
         }
-        val energy = countWhen { note ->
+        val energy = matching { note ->
             val text = note.content.lowercase()
             text.contains("fatigue") || text.contains("tired")
         }
-        val sleep = countWhen { note ->
+        val sleep = matching { note ->
             val text = note.content.lowercase()
             note.structuredObservations?.sleep in listOf("Interrupted", "Poor") ||
                 text.contains("interrupted") || text.contains("restless")
         }
         return listOf("Nutrition" to nutrition, "Energy" to energy, "Sleep" to sleep)
-            .filter { it.second > 0 }
-            .map { PotentialConcern(it.first, it.second) }
+            .filter { it.second.isNotEmpty() }
+            .map { (category, matches) ->
+                PotentialConcern(category, matches.size, matches.map(DailyNote::id))
+            }
     }
 
     override fun generateCarePlanDraft(notes: List<DailyNote>): CarePlanDraft = CarePlanDraft(

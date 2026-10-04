@@ -1,5 +1,13 @@
 package com.example.carebrief.presentation.shell
 
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
@@ -10,11 +18,15 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -23,6 +35,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.carebrief.core.navigation.Routes
+import com.example.carebrief.data.DemoCareBriefRepository
 import com.example.carebrief.data.local.DemoData
 import com.example.carebrief.presentation.analysis.AnalysisScreen
 import com.example.carebrief.presentation.careplan.CarePlanEditorScreen
@@ -160,11 +173,13 @@ fun MainScaffold(onResetOnboarding: () -> Unit) {
                 arguments = listOf(navArgument("recipientId") { type = NavType.StringType })
             ) { entry ->
                 val id = entry.arguments?.getString("recipientId") ?: "sarah"
-                val count = DemoData.sarahNotes.size
+                val notes by DemoCareBriefRepository.shared.observeNotes(id).collectAsState(initial = emptyList())
                 AnalysisScreen(
                     recipientName = displayName(id),
-                    noteCount = count,
+                    noteCount = notes.size,
                     onComplete = {
+                        com.example.carebrief.presentation.notes.TimelineAnalysisHistory
+                            .markAnalyzed(notes.map { it.id })
                         nav.navigate(Routes.summary(id)) {
                             popUpTo(Routes.analysis(id)) { inclusive = true }
                         }
