@@ -1,0 +1,25 @@
+# Gradle / Android
+.gradle/
+build/
+app/build/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Local SDK location (machine-specific)
+local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/settings.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets — never commit API keys
+*.jks
+*.keystore
+secrets.properties
