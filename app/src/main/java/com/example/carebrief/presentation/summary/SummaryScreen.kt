@@ -119,7 +119,7 @@ class SummaryViewModel(
                             severity = InsightSeverity.WATCH
                         )
                     }
-                    runCatching { insightRepository.saveAll(storedInsights) }
+                    runCatching { insightRepository?.saveAll(storedInsights) }
                 }
                 SummaryUiState.Ready(
                     recipientName = recipientName,

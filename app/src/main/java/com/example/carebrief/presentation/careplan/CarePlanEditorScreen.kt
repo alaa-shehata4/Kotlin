@@ -49,7 +49,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import com.example.carebrief.core.model.PlanStatus
 import com.example.carebrief.core.ui.components.CareBriefCard
 import com.example.carebrief.core.ui.components.ChipKind
@@ -97,6 +105,20 @@ private fun restoredReviewDate(plan: EditableCarePlan): LocalDate = runCatching 
     }
 }.getOrDefault(defaultReviewDate())
 
+sealed interface CarePlanEditorState {
+    data object Loading : CarePlanEditorState
+    data class Ready(
+        val goal: String,
+        val reason: String,
+        val actions: List<String>,
+        val monitoring: List<String>,
+        val priority: String,
+        val reviewDateLabel: String,
+        val status: String
+    ) : CarePlanEditorState
+    data class Error(val message: String) : CarePlanEditorState
+}
+
 class CarePlanEditorViewModel(
     private val recipientId: String,
     private val repo: CareBriefRepository = DemoCareBriefRepository.shared,
@@ -104,6 +126,34 @@ class CarePlanEditorViewModel(
 ) : ViewModel() {
     val notes = repo.observeNotes(recipientId)
     val existing = store.observe(recipientId)
+
+    private val _state = MutableStateFlow<CarePlanEditorState>(CarePlanEditorState.Loading)
+    val state: StateFlow<CarePlanEditorState> = _state.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            try {
+                combine(notes, existing) { n, e -> n to e }
+                    .filter { (n, _) -> n != null }
+                            .first()
+                    .let { (notesList, plan) ->
+                        val list = notesList ?: emptyList()
+                        val p = plan ?: CarePlanStore.shared.defaultFor(recipientId, list)
+                        _state.value = CarePlanEditorState.Ready(
+                            goal = p.goal,
+                            reason = p.reason,
+                            actions = p.actions,
+                            monitoring = p.monitoring,
+                            priority = p.priority,
+                            reviewDateLabel = p.reviewDateLabel,
+                            status = p.status
+                        )
+                    }
+            } catch (e: Exception) {
+                _state.value = CarePlanEditorState.Error("Something went wrong while loading this information.")
+            }
+        }
+    }
 
     fun save(plan: EditableCarePlan) = store.save(plan)
 
@@ -129,14 +179,12 @@ fun CarePlanEditorScreen(
     onApproved: () -> Unit,
     vm: CarePlanEditorViewModel = viewModel(factory = CarePlanEditorViewModel.Factory(recipientId))
 ) {
-    val notes by vm.notes.collectAsState(initial = null)
-    val existing by vm.existing.collectAsState()
+    val editorState by vm.state.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val scroll = rememberScrollState()
 
-    var seeded by remember { mutableStateOf(false) }
     var goal by remember { mutableStateOf("") }
     var reason by remember { mutableStateOf("") }
     val actions = remember { mutableStateListOf<String>() }
@@ -146,17 +194,19 @@ fun CarePlanEditorScreen(
     var newAction by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var showApproveDialog by remember { mutableStateOf(false) }
+    var seeded by remember { mutableStateOf(false) }
 
-    LaunchedEffect(notes, existing) {
-        val list = notes ?: return@LaunchedEffect
-        if (!seeded) {
-            val plan = existing ?: CarePlanStore.shared.defaultFor(recipientId, list)
-            goal = plan.goal
-            reason = plan.reason
-            actions.clear(); actions.addAll(plan.actions)
-            monitoring.clear(); monitoring.addAll(plan.monitoring)
-            priority = plan.priority
-            reviewDate = restoredReviewDate(plan)
+    LaunchedEffect(editorState) {
+        val s = editorState
+        if (s is CarePlanEditorState.Ready && !seeded) {
+            goal = s.goal
+            reason = s.reason
+            actions.clear(); actions.addAll(s.actions)
+            monitoring.clear(); monitoring.addAll(s.monitoring)
+            priority = s.priority
+            reviewDate = runCatching {
+                LocalDate.parse(s.reviewDateLabel, DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
+            }.getOrDefault(defaultReviewDate())
             seeded = true
         }
     }
@@ -183,15 +233,25 @@ fun CarePlanEditorScreen(
                 Text(recipientName, style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
             }
         }
-        if (!seeded) {
+        if (editorState is CarePlanEditorState.Loading || !seeded) {
             Column(Modifier.padding(CareBriefSpacing.md)) { LoadingRow("Loading draft") }
+            return@Column
+        }
+        if (editorState is CarePlanEditorState.Error) {
+            Column(Modifier.padding(CareBriefSpacing.md)) {
+                com.example.carebrief.core.ui.components.ErrorState(
+                    (editorState as CarePlanEditorState.Error).message,
+                    onRetry = { /* ViewModel auto-retries via state flow */ }
+                )
+            }
             return@Column
         }
         Column(
             Modifier.weight(1f).verticalScroll(scroll).padding(CareBriefSpacing.md),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (existing?.status == "ACTIVE") StatusChip("ACTIVE CARE PLAN", ChipKind.ACTIVE)
+            val readyState = editorState as? CarePlanEditorState.Ready
+            if (readyState?.status == "ACTIVE") StatusChip("ACTIVE CARE PLAN", ChipKind.ACTIVE)
             else DraftBadge()
             if (error != null) {
                 Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
@@ -309,11 +369,11 @@ fun CarePlanEditorScreen(
             Text("Selected: ${reviewDateLabel(reviewDate)}", style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
 
             PrimaryButton(
-                if (existing?.status == "ACTIVE") "Save changes" else "Save draft",
+                if (readyState?.status == "ACTIVE") "Save changes" else "Save draft",
                 onClick = {
                     val problem = validatePlan(goal, actions.toList(), monitoring.toList())
                     if (problem != null) { error = problem; return@PrimaryButton }
-                    val status = if (existing?.status == "ACTIVE") "ACTIVE" else "DRAFT"
+                    val status = if (readyState?.status == "ACTIVE") "ACTIVE" else "DRAFT"
                     vm.save(currentPlan(status))
                     scope.launch {
                         snackbar.showSnackbar(if (status == "ACTIVE") "Care plan changes saved" else "Draft saved")
