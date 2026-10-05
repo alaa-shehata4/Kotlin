@@ -210,7 +210,9 @@ class TaskStore(
         if (repository != null && scope != null) {
             scope.launch {
                 val latest = mutable(recipientId).value
-                repository.replaceForRecipient(recipientId, latest.map { it.toModel() })
+                runCatching {
+                    repository.replaceForRecipient(recipientId, latest.map { it.toModel() })
+                }
             }
             return
         }

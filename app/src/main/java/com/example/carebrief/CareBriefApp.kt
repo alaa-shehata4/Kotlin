@@ -38,11 +38,13 @@ class CareBriefApp : Application() {
             CareBriefDatabase.MIGRATION_3_4
         ).build()
         val repository = RoomCareBriefRepository(database)
-        PersistentRepositories.carePlans = RoomCarePlanRepository(database)
-        PersistentRepositories.tasks = RoomTaskRepository(database)
+        val carePlans = RoomCarePlanRepository(database)
+        val tasks = RoomTaskRepository(database)
+        PersistentRepositories.carePlans = carePlans
+        PersistentRepositories.tasks = tasks
         PersistentRepositories.insights = RoomInsightRepository(database)
-        CarePlanStore.shared.attach(PersistentRepositories.carePlans!!, applicationScope)
-        TaskStore.shared.attach(PersistentRepositories.tasks!!, applicationScope)
+        CarePlanStore.shared.attach(carePlans, applicationScope)
+        TaskStore.shared.attach(tasks, applicationScope)
         DemoCareBriefRepository.shared = repository
         applicationScope.launch {
             repository.seedIfEmpty()

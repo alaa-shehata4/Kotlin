@@ -161,7 +161,7 @@ class CarePlanStore(
         if (repository != null && scope != null) {
             scope.launch {
                 val latest = mutable(plan.recipientId).value ?: plan
-                repository.save(latest.toModel())
+                runCatching { repository.save(latest.toModel()) }
             }
         } else {
             preferences?.edit()?.putString(plan.recipientId, encodePlan(plan))?.apply()
