@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -58,6 +61,14 @@ val NOTE_CATEGORIES = listOf(
     "Medication adherence", "Behavior", "Pain", "Other"
 )
 
+/** Phase 28 — explicit editor state: Idle / Saving / Saved / Error. */
+sealed interface NoteEditorScreenState {
+    data object Idle : NoteEditorScreenState
+    data object Saving : NoteEditorScreenState
+    data object Saved : NoteEditorScreenState
+    data class Error(val message: String) : NoteEditorScreenState
+}
+
 class NoteEditorViewModel(
     private val repo: CareBriefRepository = DemoCareBriefRepository.shared
 ) : ViewModel() {
@@ -65,6 +76,10 @@ class NoteEditorViewModel(
     val saved: StateFlow<Boolean> = _saved
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
+
+    /** Phase 28 canonical state; [saved]/[error] kept as compat aliases. */
+    private val _screenState = MutableStateFlow<NoteEditorScreenState>(NoteEditorScreenState.Idle)
+    val screenState: StateFlow<NoteEditorScreenState> = _screenState
 
     fun save(
         recipientId: String,
@@ -74,20 +89,35 @@ class NoteEditorViewModel(
         structuredObservations: StructuredObservations?
     ) {
         when (val v = NoteValidator.validate(content, categories)) {
-            is NoteValidator.Result.Invalid -> { _error.value = v.message; return }
+            is NoteValidator.Result.Invalid -> {
+                _error.value = v.message
+                _screenState.value = NoteEditorScreenState.Error(v.message)
+                return
+            }
             NoteValidator.Result.Valid -> Unit
         }
+        _screenState.value = NoteEditorScreenState.Saving
         viewModelScope.launch {
             try {
                 repo.addNote(recipientId, content, categories, author, structuredObservations)
                 _saved.value = true
+                _screenState.value = NoteEditorScreenState.Saved
             } catch (e: IllegalArgumentException) {
                 _error.value = e.message
+                _screenState.value = NoteEditorScreenState.Error(e.message ?: "Couldn't save the note.")
+            } catch (e: Exception) {
+                _error.value = "Couldn't save the note. Please try again."
+                _screenState.value = NoteEditorScreenState.Error("Couldn't save the note. Please try again.")
             }
         }
     }
 
-    fun clearError() { _error.value = null }
+    fun clearError() {
+        _error.value = null
+        if (_screenState.value is NoteEditorScreenState.Error) {
+            _screenState.value = NoteEditorScreenState.Idle
+        }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -117,12 +147,14 @@ fun NoteEditorScreen(
         if (saved) snackbar.showSnackbar("Note saved")
     }
 
-    Column(Modifier.fillMaxSize()) {
+    // Phase 25: imePadding keeps the CTA visible with the keyboard up;
+    // heightIn (not fixed height) supports large system fonts and long text.
+    Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding()) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 16.dp)) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             Column(Modifier.weight(1f)) {
-                Text("New daily note", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("$recipientName · $nowLabel", style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
+                Text("New daily note", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, softWrap = true)
+                Text("$recipientName · $nowLabel", style = MaterialTheme.typography.bodyMedium, color = InkSecondary, softWrap = true)
             }
         }
         Column(
@@ -133,7 +165,7 @@ fun NoteEditorScreen(
             OutlinedTextField(
                 value = observation,
                 onValueChange = { observation = it; vm.clearError() },
-                modifier = Modifier.fillMaxWidth().height(160.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp),
                 placeholder = { Text("Describe what you observed today...") },
                 shape = MaterialTheme.shapes.small,
                 isError = error != null

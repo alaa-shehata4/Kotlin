@@ -8,9 +8,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.CircularProgressIndicator
@@ -64,17 +67,27 @@ fun AnalysisScreen(
         label = "analysis-progress"
     )
 
+    // Phase 30: scrollable + centered so small phones and large fonts never clip.
+    val scroll = rememberScrollState()
     Column(
-        Modifier.fillMaxSize().padding(CareBriefSpacing.lg),
+        Modifier.fillMaxSize().navigationBarsPadding().verticalScroll(scroll).padding(CareBriefSpacing.lg),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("Analyzing notes", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+        Text(
+            "Analyzing notes",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            softWrap = true
+        )
         Spacer(Modifier.height(4.dp))
         Text(
             "$recipientName · $noteCount recent notes",
             style = MaterialTheme.typography.bodyMedium,
-            color = InkSecondary
+            color = InkSecondary,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            softWrap = true
         )
         Spacer(Modifier.height(8.dp))
         DraftBadge()
@@ -125,7 +138,9 @@ fun AnalysisScreen(
         Text(
             "Working offline on this device. This usually takes a few seconds.",
             style = MaterialTheme.typography.bodyMedium,
-            color = InkSecondary
+            color = InkSecondary,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            softWrap = true
         )
         Spacer(Modifier.height(8.dp))
         TextButton(onClick = {

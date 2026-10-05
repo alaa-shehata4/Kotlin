@@ -1,13 +1,17 @@
 package com.example.carebrief.core.ui.components
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -196,9 +200,20 @@ fun MetricCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(Modifier.padding(CareBriefSpacing.md)) {
-            Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                value,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.SemiBold,
+                softWrap = true,
+                maxLines = 2
+            )
             Spacer(Modifier.height(2.dp))
-            Text(label, style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = InkSecondary,
+                softWrap = true
+            )
         }
     }
 }
@@ -207,12 +222,13 @@ fun MetricCard(
 fun PrimaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
     Button(
         onClick = onClick,
-        modifier = modifier.height(52.dp),
+        // Phase 25: heightIn (not fixed height) so large system fonts don't clip.
+        modifier = modifier.heightIn(min = 52.dp),
         enabled = enabled,
         shape = MaterialTheme.shapes.small,
         colors = ButtonDefaults.buttonColors(containerColor = TealPrimary)
     ) {
-        Text(text, style = MaterialTheme.typography.titleMedium)
+        Text(text, style = MaterialTheme.typography.titleMedium, softWrap = true)
     }
 }
 
@@ -220,10 +236,10 @@ fun PrimaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifi
 fun SecondaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier.height(52.dp),
+        modifier = modifier.heightIn(min = 52.dp),
         shape = MaterialTheme.shapes.small
     ) {
-        Text(text, style = MaterialTheme.typography.titleMedium, color = TealPrimary)
+        Text(text, style = MaterialTheme.typography.titleMedium, color = TealPrimary, softWrap = true)
     }
 }
 
@@ -255,6 +271,7 @@ fun InsightCard(title: String, description: String, icon: ImageVector = Icons.Fi
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun NoteCard(
     dayLabel: String,
@@ -269,10 +286,16 @@ fun NoteCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 StatusChip("$dayLabel · $timeLabel", ChipKind.INFO)
                 Spacer(Modifier.width(8.dp))
-                Text(author, style = MaterialTheme.typography.labelMedium, color = InkSecondary)
+                Text(
+                    author,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = InkSecondary,
+                    softWrap = true,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
             }
             Spacer(Modifier.height(8.dp))
-            Text(content, style = MaterialTheme.typography.bodyLarge)
+            Text(content, style = MaterialTheme.typography.bodyLarge, softWrap = true)
             val structured = listOfNotNull(
                 structuredObservations?.mood?.let { "Mood: $it" },
                 structuredObservations?.mobility?.let { "Mobility: $it" },
@@ -281,11 +304,20 @@ fun NoteCard(
             )
             if (structured.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
-                Text(structured.joinToString(" · "), style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
+                Text(
+                    structured.joinToString(" · "),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = InkSecondary,
+                    softWrap = true
+                )
             }
             if (categories.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Phase 25: FlowRow wraps on narrow phones / large fonts.
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     categories.forEach { StatusChip(it, ChipKind.NEUTRAL) }
                 }
             }
@@ -427,6 +459,7 @@ fun EvidenceCard(    observation: String,
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TaskCard(
     title: String,
@@ -438,7 +471,7 @@ fun TaskCard(
     onToggle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    CareBriefCard(modifier = modifier) {
+    CareBriefCard(modifier = modifier.animateContentSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             androidx.compose.material3.Checkbox(
                 checked = completed,
@@ -454,10 +487,15 @@ fun TaskCard(
                         )
                     } else MaterialTheme.typography.bodyLarge,
                     fontWeight = if (completed) FontWeight.Normal else FontWeight.Medium,
-                    color = if (completed) InkSecondary else MaterialTheme.colorScheme.onSurface
+                    color = if (completed) InkSecondary else MaterialTheme.colorScheme.onSurface,
+                    softWrap = true
                 )
                 Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Phase 25: wraps instead of overflowing on small screens.
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     StatusChip(category, ChipKind.INFO)
                     StatusChip(frequency, ChipKind.NEUTRAL)
                     if (priority == "High") StatusChip("High priority", ChipKind.CONCERN)
@@ -466,7 +504,8 @@ fun TaskCard(
                 Text(
                     if (completed) "Completed · tap to undo" else "Due: $dueLabel",
                     style = MaterialTheme.typography.labelMedium,
-                    color = InkSecondary
+                    color = InkSecondary,
+                    softWrap = true
                 )
             }
         }

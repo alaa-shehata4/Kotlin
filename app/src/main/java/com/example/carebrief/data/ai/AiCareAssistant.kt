@@ -54,9 +54,12 @@ class DemoAiCareAssistant : AiCareAssistant {
 
     override fun analyzePotentialConcerns(notes: List<DailyNote>): List<PotentialConcern> {
         fun matching(predicate: (DailyNote) -> Boolean) = notes.filter(predicate)
+        // Phase 26: checks both the flat fields and the legacy structured wrapper.
+        fun appetiteOf(note: DailyNote) = note.appetite ?: note.structuredObservations?.appetite
+        fun sleepOf(note: DailyNote) = note.sleep ?: note.structuredObservations?.sleep
         val nutrition = matching { note ->
             val text = note.content.lowercase()
-            note.structuredObservations?.appetite in listOf("Reduced", "Poor") ||
+            appetiteOf(note) in listOf("Reduced", "Poor") ||
                 listOf("reduced", "very little", "untouched", "not very hungry", "wasn't hungry").any { text.contains(it) }
         }
         val energy = matching { note ->
@@ -65,7 +68,7 @@ class DemoAiCareAssistant : AiCareAssistant {
         }
         val sleep = matching { note ->
             val text = note.content.lowercase()
-            note.structuredObservations?.sleep in listOf("Interrupted", "Poor") ||
+            sleepOf(note) in listOf("Interrupted", "Poor") ||
                 text.contains("interrupted") || text.contains("restless")
         }
         return listOf("Nutrition" to nutrition, "Energy" to energy, "Sleep" to sleep)

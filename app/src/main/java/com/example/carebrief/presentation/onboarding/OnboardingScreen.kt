@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -53,7 +54,7 @@ fun OnboardingScreen(onFinish: () -> Unit) {
     val scope = rememberCoroutineScope()
 
     Column(
-        Modifier.fillMaxSize().padding(CareBriefSpacing.lg),
+        Modifier.fillMaxSize().navigationBarsPadding().padding(CareBriefSpacing.lg),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -77,22 +78,30 @@ fun OnboardingScreen(onFinish: () -> Unit) {
                         modifier = Modifier.padding(28.dp).padding(4.dp)
                     )
                 }
+                // Phase 30: centered copy reads as an intentional product page,
+                // not left-aligned boilerplate; wraps cleanly at large fonts.
                 Text(
                     pages[i].title,
                     style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    softWrap = true
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
                     pages[i].body,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = InkSecondary
+                    color = InkSecondary,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    softWrap = true
                 )
                 Spacer(Modifier.height(16.dp))
                 Text(
                     "AI-generated content is a draft and should be reviewed by an appropriate human professional.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = InkSecondary
+                    color = InkSecondary,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    softWrap = true
                 )
             }
         }

@@ -19,9 +19,16 @@ data class InsightEvidence(
 fun buildInsightEvidence(
     category: String,
     notes: List<DailyNote>,
-    supportingNoteIds: List<String>
+    supportingNoteIds: List<String> = emptyList()
 ): InsightEvidence {
-    val matches = notes.filter { it.id in supportingNoteIds }
+    // Phase 10/26: explicit IDs win (production path). When callers omit IDs
+    // (unit tests / legacy), fall back to honest category matching so the
+    // frequency stays count-based and never a fake confidence percentage.
+    val matches = if (supportingNoteIds.isEmpty()) {
+        notes.filter { note -> note.categories.any { it.equals(category, ignoreCase = true) } }
+    } else {
+        notes.filter { it.id in supportingNoteIds }
+    }
     return InsightEvidence(
         category = category,
         observation = concernText(category, matches.size, notes.size),

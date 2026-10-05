@@ -147,6 +147,12 @@ class RoomCareBriefRepository(private val database: CareBriefDatabase) : CareBri
 
     override suspend fun resetDemoData() {
         database.withTransaction {
+            // Phase 27: reset covers all local-first tables (recipients, notes,
+            // care plans, tasks, persisted AI insights). All inside one
+            // transaction, all suspending — never blocks the UI thread.
+            database.aiInsightDao().clearAll()
+            database.taskDao().clearAll()
+            database.carePlanDao().clearAll()
             database.noteDao().clearAll()
             database.recipientDao().clearAll()
             database.recipientDao().upsertAll(DemoData.recipients.map(CareRecipient::toEntity))
@@ -156,8 +162,17 @@ class RoomCareBriefRepository(private val database: CareBriefDatabase) : CareBri
     }
 }
 
-private fun CareRecipient.toEntity() = RecipientEntity(
-    id, name, age, careStatus, planStatus.name, lastNoteLabel, pendingTasks, initials
+private fun CareRecipient.toEntity(nowMillis: Long = System.currentTimeMillis()) = RecipientEntity(
+    id = id,
+    name = name,
+    age = age,
+    careStatus = careStatus,
+    planStatus = planStatus.name,
+    lastNoteLabel = lastNoteLabel,
+    pendingTasks = pendingTasks,
+    initials = initials,
+    createdAtMillis = createdAtMillis.takeIf { it != 0L } ?: nowMillis,
+    avatarUri = avatarUri
 )
 
 private fun createDailyNote(
@@ -170,16 +185,27 @@ private fun createDailyNote(
 ): DailyNote {
     val trimmed = content.trim()
     require(trimmed.length >= 10) { "Please add a little more detail (at least 10 characters)." }
+    val epoch = now.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+    // Keep flat Phase-26 fields and the legacy structured wrapper in sync.
+    val mood = structuredObservations?.mood
+    val mobility = structuredObservations?.mobility
+    val appetite = structuredObservations?.appetite
+    val sleep = structuredObservations?.sleep
     return DailyNote(
         id = UUID.randomUUID().toString(),
         recipientId = recipientId,
+        timestampMillis = epoch,
         dayLabel = "Today",
         timeLabel = now.format(DateTimeFormatter.ofPattern("HH:mm")),
         author = author.ifBlank { "Caregiver" },
         content = trimmed,
         categories = categories.ifEmpty { listOf("Other") },
+        mood = mood,
+        mobility = mobility,
+        appetite = appetite,
+        sleep = sleep,
         structuredObservations = structuredObservations,
-        recordedAtMillis = now.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        recordedAtMillis = epoch
     )
 }
 
@@ -191,7 +217,9 @@ private fun RecipientEntity.toModel() = CareRecipient(
     planStatus = runCatching { PlanStatus.valueOf(planStatus) }.getOrDefault(PlanStatus.NONE),
     lastNoteLabel = lastNoteLabel,
     pendingTasks = pendingTasks,
-    initials = initials
+    initials = initials,
+    createdAtMillis = createdAtMillis,
+    avatarUri = avatarUri
 )
 
 private fun DailyNote.toEntity(recordedAt: LocalDateTime) = NoteEntity(
@@ -203,10 +231,10 @@ private fun DailyNote.toEntity(recordedAt: LocalDateTime) = NoteEntity(
     author = author,
     content = content,
     categoriesCsv = categories.joinToString("|"),
-    mood = structuredObservations?.mood,
-    mobility = structuredObservations?.mobility,
-    appetite = structuredObservations?.appetite,
-    sleep = structuredObservations?.sleep
+    mood = mood ?: structuredObservations?.mood,
+    mobility = mobility ?: structuredObservations?.mobility,
+    appetite = appetite ?: structuredObservations?.appetite,
+    sleep = sleep ?: structuredObservations?.sleep
 )
 
 private fun DailyNote.toSeedEntity(): NoteEntity {
@@ -223,11 +251,16 @@ private fun DailyNote.toSeedEntity(): NoteEntity {
 private fun NoteEntity.toModel() = DailyNote(
     id = id,
     recipientId = recipientId,
+    timestampMillis = timestamp,
     dayLabel = dayLabel,
     timeLabel = timeLabel,
     author = author,
     content = content,
     categories = categoriesCsv.split('|').filter(String::isNotBlank),
+    mood = mood,
+    mobility = mobility,
+    appetite = appetite,
+    sleep = sleep,
     structuredObservations = if (mood == null && mobility == null && appetite == null && sleep == null) null
     else StructuredObservations(mood, mobility, appetite, sleep),
     recordedAtMillis = timestamp

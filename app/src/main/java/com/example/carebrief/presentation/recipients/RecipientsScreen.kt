@@ -3,9 +3,12 @@ package com.example.carebrief.presentation.recipients
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -20,9 +23,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -55,6 +55,14 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 
+/** Phase 28 — explicit recipients state: Loading / Success / Empty / Error. */
+sealed interface RecipientsScreenState {
+    data object Loading : RecipientsScreenState
+    data class Content(val people: List<CareRecipient>, val query: String) : RecipientsScreenState
+    data class Empty(val query: String) : RecipientsScreenState
+    data class Error(val message: String = "Something went wrong while loading this information.") : RecipientsScreenState
+}
+
 class RecipientsViewModel(
     private val repo: CareBriefRepository = DemoCareBriefRepository.shared
 ) : ViewModel() {
@@ -75,6 +83,18 @@ class RecipientsViewModel(
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** Phase 28 canonical state; [uiState]/[error] kept as compat aliases. */
+    @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
+    val screenState: StateFlow<RecipientsScreenState> = combine(
+        uiState, query, _error
+    ) { people, q, failed ->
+        when {
+            failed && people.isEmpty() -> RecipientsScreenState.Error()
+            people.isEmpty() -> RecipientsScreenState.Empty(q)
+            else -> RecipientsScreenState.Content(people, q)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RecipientsScreenState.Loading)
+
     fun onQueryChange(q: String) { query.value = q }
     fun currentQuery(): StateFlow<String> = query
     fun retry() {
@@ -83,18 +103,28 @@ class RecipientsViewModel(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RecipientsScreen(
     onOpenRecipient: (String) -> Unit,
     vm: RecipientsViewModel = viewModel()
 ) {
-    val people by vm.uiState.collectAsState()
-    val query by vm.currentQuery().collectAsState()
-    val loadError by vm.error.collectAsState()
-    var firstLoad by remember { mutableStateOf(true) }
-    if (people.isNotEmpty()) firstLoad = false
+    // Phase 28: single explicit state (Loading / Content / Empty / Error).
+    val screenState by vm.screenState.collectAsState()
+    val queryFlow by vm.currentQuery().collectAsState()
+    val people = when (val s = screenState) {
+        is RecipientsScreenState.Content -> s.people
+        else -> emptyList()
+    }
+    val query = when (val s = screenState) {
+        is RecipientsScreenState.Content -> s.query
+        is RecipientsScreenState.Empty -> s.query
+        else -> queryFlow
+    }
+    val loadError = screenState is RecipientsScreenState.Error
+    val isLoading = screenState is RecipientsScreenState.Loading
 
-    Column(Modifier.fillMaxSize().padding(CareBriefSpacing.md)) {
+    Column(Modifier.fillMaxSize().navigationBarsPadding().padding(CareBriefSpacing.md)) {
         Text("People", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(4.dp))
         Text("Everyone you support, at a glance.", style = MaterialTheme.typography.bodyMedium, color = InkSecondary)
@@ -114,7 +144,7 @@ fun RecipientsScreen(
                 "Something went wrong while loading this information.",
                 onRetry = vm::retry
             )
-        } else if (firstLoad && people.isEmpty()) {
+        } else if (isLoading) {
             LoadingRow("Loading people")
         } else if (people.isEmpty()) {
             EmptyState(
@@ -139,7 +169,11 @@ fun RecipientsScreen(
                                     color = InkSecondary
                                 )
                                 Spacer(Modifier.height(6.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                // Phase 30: wraps on narrow phones / large fonts.
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
                                     val status = person.planStatus.presentation()
                                     StatusChip(status.listLabel, status.kind)
                                     StatusChip("${person.pendingTasks} pending tasks", ChipKind.NEUTRAL)

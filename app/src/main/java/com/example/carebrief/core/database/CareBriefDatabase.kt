@@ -21,7 +21,11 @@ data class RecipientEntity(
     val planStatus: String,
     val lastNoteLabel: String,
     val pendingTasks: Int,
-    val initials: String
+    val initials: String,
+    /** Phase 26/27: canonical creation timestamp. 0 = seeded legacy row. */
+    val createdAtMillis: Long = 0L,
+    /** Phase 26/27: optional avatar reference. Null = initials avatar. */
+    val avatarUri: String? = null
 )
 
 @Entity(tableName = "notes")
@@ -82,10 +86,23 @@ interface NoteDao {
     suspend fun clearAll()
 }
 
-@Database(entities = [RecipientEntity::class, NoteEntity::class], version = 2, exportSchema = false)
+@Database(
+    entities = [
+        RecipientEntity::class,
+        NoteEntity::class,
+        CarePlanEntity::class,
+        TaskEntity::class,
+        AiInsightEntity::class
+    ],
+    version = 4,
+    exportSchema = false
+)
 abstract class CareBriefDatabase : RoomDatabase() {
     abstract fun recipientDao(): RecipientDao
     abstract fun noteDao(): NoteDao
+    abstract fun carePlanDao(): CarePlanDao
+    abstract fun taskDao(): TaskDao
+    abstract fun aiInsightDao(): AiInsightDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -94,6 +111,58 @@ abstract class CareBriefDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE notes ADD COLUMN mobility TEXT")
                 db.execSQL("ALTER TABLE notes ADD COLUMN appetite TEXT")
                 db.execSQL("ALTER TABLE notes ADD COLUMN sleep TEXT")
+            }
+        }
+
+        /**
+         * Phase 27: recipients gain createdAt/avatar columns; new tables for
+         * care plans, tasks and persisted AI insights. All async via Room;
+         * callers observe Flow and never block the UI thread.
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE recipients ADD COLUMN createdAtMillis INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE recipients ADD COLUMN avatarUri TEXT")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `care_plans` (" +
+                        "`id` TEXT NOT NULL, `recipientId` TEXT NOT NULL, " +
+                        "`goal` TEXT NOT NULL, `reason` TEXT NOT NULL, " +
+                        "`actionsRaw` TEXT NOT NULL, `monitoringRaw` TEXT NOT NULL, " +
+                        "`priority` TEXT NOT NULL, `status` TEXT NOT NULL, " +
+                        "`reviewDateMillis` INTEGER NOT NULL, `reviewDateLabel` TEXT NOT NULL, " +
+                        "`createdAtMillis` INTEGER NOT NULL, `updatedAtMillis` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`id`))"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_care_plans_recipientId` ON `care_plans` (`recipientId`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `tasks` (" +
+                        "`id` TEXT NOT NULL, `carePlanId` TEXT, `recipientId` TEXT NOT NULL, " +
+                        "`title` TEXT NOT NULL, `description` TEXT NOT NULL, " +
+                        "`dueDateMillis` INTEGER NOT NULL, `dueLabel` TEXT NOT NULL, " +
+                        "`priority` TEXT NOT NULL, `category` TEXT NOT NULL, " +
+                        "`frequency` TEXT NOT NULL, `completed` INTEGER NOT NULL, " +
+                        "`createdAtMillis` INTEGER NOT NULL, `updatedAtMillis` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`id`))"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_tasks_recipientId` ON `tasks` (`recipientId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_tasks_carePlanId` ON `tasks` (`carePlanId`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `ai_insights` (" +
+                        "`id` TEXT NOT NULL, `recipientId` TEXT NOT NULL, " +
+                        "`title` TEXT NOT NULL, `description` TEXT NOT NULL, " +
+                        "`evidence` TEXT NOT NULL, `frequency` TEXT NOT NULL, " +
+                        "`frequencyCount` INTEGER NOT NULL, `frequencyTotal` INTEGER NOT NULL, " +
+                        "`severity` TEXT NOT NULL, `createdAtMillis` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`id`))"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_ai_insights_recipientId` ON `ai_insights` (`recipientId`)")
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE care_plans ADD COLUMN approvedAtMillis INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE tasks ADD COLUMN sourceFingerprint TEXT NOT NULL DEFAULT ''")
             }
         }
     }

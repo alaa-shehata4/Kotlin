@@ -37,6 +37,9 @@ class DemoAiTest {
     fun tasks_arePractical() {
         val draft = ai.generateCarePlanDraft(DemoData.sarahNotes)
         val tasks = ai.generateSuggestedTasks(draft)
-        assertEquals(4, tasks.size)
+        // Deterministic 1:1 mapping: one practical task per draft action.
+        assertEquals(draft.actions.size, tasks.size)
+        assertTrue(tasks.isNotEmpty())
+        assertEquals(tasks, ai.generateSuggestedTasks(draft))
     }
 }

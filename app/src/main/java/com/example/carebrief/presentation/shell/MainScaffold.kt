@@ -10,8 +10,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Assignment
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.People
@@ -25,7 +25,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
@@ -35,8 +37,11 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.carebrief.core.navigation.Routes
-import com.example.carebrief.data.DemoCareBriefRepository
 import com.example.carebrief.data.local.DemoData
+import com.example.carebrief.data.DemoCareBriefRepository
+import com.example.carebrief.data.AnalysisRange
+import com.example.carebrief.data.SettingsStore
+import com.example.carebrief.data.analysisNotes
 import com.example.carebrief.presentation.analysis.AnalysisScreen
 import com.example.carebrief.presentation.careplan.CarePlanEditorScreen
 import com.example.carebrief.presentation.careplan.CarePlanScreen
@@ -55,7 +60,10 @@ private fun displayName(id: String): String =
     DemoData.recipients.find { it.id == id }?.name ?: "Sarah Johnson"
 
 @Composable
-fun MainScaffold(onResetOnboarding: () -> Unit) {
+fun MainScaffold(
+    startDestination: String = Routes.HOME,
+    onResetOnboarding: () -> Unit
+) {
     val nav = rememberNavController()
     val tabs = listOf(
         Tab(Routes.HOME, "Home"),
@@ -68,44 +76,111 @@ fun MainScaffold(onResetOnboarding: () -> Unit) {
         Routes.HOME to Icons.Filled.Home,
         Routes.PEOPLE to Icons.Filled.People,
         Routes.NOTES to Icons.Filled.Description,
-        Routes.PLAN to Icons.Filled.Favorite,
+        // Phase 31: clipboard reads as "care plan"; a heart reads as favorites.
+        Routes.PLAN to Icons.Filled.Assignment,
         Routes.MORE to Icons.Filled.MoreHoriz
     )
 
-    Scaffold(
-        bottomBar = {
-            NavigationBar {
-                val backStack by nav.currentBackStackEntryAsState()
-                val current = backStack?.destination?.route
-                fun selectedFor(tab: String): Boolean = when (tab) {
-                    Routes.HOME -> current == Routes.HOME
-                    Routes.PEOPLE -> current == Routes.PEOPLE || (current?.startsWith("profile/") == true)
-                    Routes.NOTES -> current == Routes.NOTES || (current?.startsWith("note/") == true) ||
-                        (current?.startsWith("analysis/") == true) || (current?.startsWith("summary/") == true)
-                    Routes.PLAN -> current == Routes.PLAN || (current?.startsWith("plan/") == true)
-                    else -> current == tab
-                }
-                tabs.forEach { tab ->
-                    NavigationBarItem(
-                        selected = selectedFor(tab.route),
-                        onClick = {
-                            nav.navigate(tab.route) {
-                                popUpTo(nav.graph.findStartDestination().id) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                        icon = { Icon(icons[tab.route]!!, contentDescription = tab.label) },
-                        label = { Text(tab.label) }
-                    )
-                }
+    // Phase 25: bottom bar on phones, side rail on large screens/emulators.
+    // No hard-coded dimensions — driven by available width; rotation simply
+    // recomposes to the matching navigation pattern.
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val useRail = maxWidth >= 840.dp
+        val backStack by nav.currentBackStackEntryAsState()
+        val current = backStack?.destination?.route
+        fun selectedFor(tab: String): Boolean = when (tab) {
+            Routes.HOME -> current == Routes.HOME
+            Routes.PEOPLE -> current == Routes.PEOPLE || (current?.startsWith("profile/") == true)
+            Routes.NOTES -> current == Routes.NOTES || (current?.startsWith("note/") == true) ||
+                (current?.startsWith("analysis/") == true) || (current?.startsWith("summary/") == true)
+            Routes.PLAN -> current == Routes.PLAN || (current?.startsWith("plan/") == true) ||
+                (current?.startsWith("tasks/") == true)
+            else -> current == tab
+        }
+        fun navigateTo(route: String) {
+            nav.navigate(route) {
+                popUpTo(nav.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
             }
         }
-    ) { padding ->
+
+        if (useRail) {
+            Row(Modifier.fillMaxSize()) {
+                NavigationRail {
+                    tabs.forEach { tab ->
+                        NavigationRailItem(
+                            selected = selectedFor(tab.route),
+                            onClick = { navigateTo(tab.route) },
+                            icon = { Icon(icons[tab.route]!!, contentDescription = tab.label) },
+                            label = { Text(tab.label) }
+                        )
+                    }
+                }
+                MainNavHost(nav, startDestination, Modifier.weight(1f))
+            }
+            return@BoxWithConstraints
+        }
+
+        Scaffold(
+            bottomBar = {
+                NavigationBar {
+                    tabs.forEach { tab ->
+                        NavigationBarItem(
+                            selected = selectedFor(tab.route),
+                            onClick = { navigateTo(tab.route) },
+                            icon = { Icon(icons[tab.route]!!, contentDescription = tab.label) },
+                            label = { Text(tab.label) }
+                        )
+                    }
+                }
+            }
+        ) { padding ->
+            MainNavHost(nav, startDestination, Modifier.padding(padding))
+        }
+    }
+}
+
+@Composable
+private fun MainNavHost(
+    nav: androidx.navigation.NavHostController,
+    startDestination: String,
+    modifier: Modifier = Modifier
+) {
         NavHost(
             navController = nav,
-            startDestination = Routes.HOME,
-            modifier = Modifier.padding(padding)
+            startDestination = startDestination,
+            modifier = modifier,
+            enterTransition = {
+                fadeIn(
+                    animationSpec = tween(220)
+                ) + slideIntoContainer(
+                    towards = AnimatedContentTransitionScope.SlideDirection.Start,
+                    animationSpec = tween(
+                        220, easing = FastOutSlowInEasing
+                    )
+                )
+            },
+            exitTransition = {
+                fadeOut(
+                    animationSpec = tween(180)
+                )
+            },
+            popEnterTransition = {
+                fadeIn(
+                    animationSpec = tween(220)
+                )
+            },
+            popExitTransition = {
+                fadeOut(
+                    animationSpec = tween(180)
+                ) + slideOutOfContainer(
+                    towards = AnimatedContentTransitionScope.SlideDirection.End,
+                    animationSpec = tween(
+                        220, easing = FastOutSlowInEasing
+                    )
+                )
+            }
         ) {
             composable(Routes.HOME) {
                 DashboardScreen(
@@ -188,13 +263,17 @@ fun MainScaffold(onResetOnboarding: () -> Unit) {
                 arguments = listOf(navArgument("recipientId") { type = NavType.StringType })
             ) { entry ->
                 val id = entry.arguments?.getString("recipientId") ?: "sarah"
+                val context = LocalContext.current.applicationContext
+                val settings = remember(context) { SettingsStore(context) }
+                val range by settings.analysisRange.collectAsState(initial = AnalysisRange.LAST_7_DAYS)
                 val notes by DemoCareBriefRepository.shared.observeNotes(id).collectAsState(initial = emptyList())
+                val includedNotes = analysisNotes(notes, range)
                 AnalysisScreen(
                     recipientName = displayName(id),
-                    noteCount = notes.size,
+                    noteCount = includedNotes.size,
                     onComplete = {
                         com.example.carebrief.presentation.notes.TimelineAnalysisHistory
-                            .markAnalyzed(notes.map { it.id })
+                            .markAnalyzed(includedNotes.map { it.id })
                         nav.navigate(Routes.summary(id)) {
                             popUpTo(Routes.analysis(id)) { inclusive = true }
                         }
@@ -232,5 +311,4 @@ fun MainScaffold(onResetOnboarding: () -> Unit) {
                 )
             }
         }
-    }
 }

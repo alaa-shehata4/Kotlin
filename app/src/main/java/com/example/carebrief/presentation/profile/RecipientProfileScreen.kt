@@ -2,9 +2,12 @@ package com.example.carebrief.presentation.profile
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -57,7 +60,10 @@ import com.example.carebrief.data.EditableCarePlan
 import com.example.carebrief.data.TaskStore
 import com.example.carebrief.data.CareTask
 import com.example.carebrief.data.ai.AiProviders
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import java.time.Instant
@@ -77,6 +83,13 @@ data class ProfileUiState(
 
 data class ProfileActivityItem(val timestamp: Long, val title: String, val detail: String)
 
+/** Phase 28 — explicit profile state: Loading / Content / Error. */
+sealed interface ProfileScreenState {
+    data object Loading : ProfileScreenState
+    data class Content(val data: ProfileUiState) : ProfileScreenState
+    data class Error(val message: String = "Something went wrong while loading this information.") : ProfileScreenState
+}
+
 class RecipientProfileViewModel(
     private val recipientId: String,
     private val repo: CareBriefRepository = DemoCareBriefRepository.shared
@@ -87,7 +100,11 @@ class RecipientProfileViewModel(
         repo.observeRecipient(recipientId),
         repo.observeNotes(recipientId)
     ) { recipient, notes -> ProfileUiState(recipient, notes) }
-    val uiState = combine(profile, plans.observe(recipientId), tasks.observe(recipientId)) { state, savedPlan, currentTasks ->
+    private val loadFailed = MutableStateFlow(false)
+    private val retryTick = MutableStateFlow(0)
+    val uiState: StateFlow<ProfileUiState> = combine(
+        profile, plans.observe(recipientId), tasks.observe(recipientId), retryTick
+    ) { state, savedPlan, currentTasks, _ ->
         val plan = savedPlan ?: plans.defaultFor(recipientId, state.notes)
         val activity = buildList {
             state.notes.forEach { note ->
@@ -113,7 +130,29 @@ class RecipientProfileViewModel(
             activity = activity
         )
     }
+        .catch {
+            loadFailed.value = true
+            emit(ProfileUiState())
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ProfileUiState())
+
+    /**
+     * Phase 28 canonical state: Loading until the first emission with a
+     * recipient; Content afterwards; Error when the repository flow fails.
+     * [uiState] is kept as a compat alias for existing callers.
+     */
+    val screenState: StateFlow<ProfileScreenState> = combine(uiState, loadFailed) { state, failed ->
+        when {
+            failed && state.recipient == null -> ProfileScreenState.Error() as ProfileScreenState
+            state.recipient == null -> ProfileScreenState.Loading as ProfileScreenState
+            else -> ProfileScreenState.Content(state)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ProfileScreenState.Loading)
+
+    fun retry() {
+        loadFailed.value = false
+        retryTick.value += 1
+    }
 
     fun ensureTasks(plan: EditableCarePlan?) {
         if (plan == null) return
@@ -155,6 +194,7 @@ private fun activityTime(timestamp: Long): String {
     return "$date · ${dateTime.format(DateTimeFormatter.ofPattern("HH:mm"))}"
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RecipientProfileScreen(
     recipientId: String,
@@ -165,12 +205,18 @@ fun RecipientProfileScreen(
     onViewTasks: (String) -> Unit = {},
     vm: RecipientProfileViewModel = viewModel(factory = RecipientProfileViewModel.Factory(recipientId))
 ) {
-    val state by vm.uiState.collectAsState()
+    // Phase 28: explicit Loading / Content / Error drives the hero section.
+    val screenState by vm.screenState.collectAsState()
+    val fallback by vm.uiState.collectAsState()
+    val state = when (val s = screenState) {
+        is ProfileScreenState.Content -> s.data
+        else -> fallback
+    }
     val scroll = rememberScrollState()
     val ai = remember { AiProviders.current() }
     LaunchedEffect(state.carePlan) { vm.ensureTasks(state.carePlan) }
 
-    Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(CareBriefSpacing.md)) {
+    Column(Modifier.fillMaxSize().navigationBarsPadding().verticalScroll(scroll).padding(CareBriefSpacing.md)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -179,6 +225,13 @@ fun RecipientProfileScreen(
         }
         Spacer(Modifier.height(8.dp))
 
+        if (screenState is ProfileScreenState.Error && state.recipient == null) {
+            com.example.carebrief.core.ui.components.ErrorState(
+                (screenState as ProfileScreenState.Error).message,
+                onRetry = vm::retry
+            )
+            return@Column
+        }
         val person = state.recipient
         if (person == null) {
             LoadingRow("Loading profile")
@@ -198,7 +251,11 @@ fun RecipientProfileScreen(
                         color = InkSecondary
                     )
                     Spacer(Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Phase 30: wraps on narrow phones / large fonts.
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         val status = person.planStatus.presentation()
                         StatusChip(status.profileLabel, status.kind)
                         StatusChip("${state.tasks.count { !it.completed }} pending tasks", ChipKind.NEUTRAL)

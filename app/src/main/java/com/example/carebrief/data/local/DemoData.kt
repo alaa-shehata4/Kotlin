@@ -1,7 +1,5 @@
 package com.example.carebrief.data.local
 
-import com.example.carebrief.core.model.ActivityItem
-import com.example.carebrief.core.model.AttentionItem
 import com.example.carebrief.core.model.CareRecipient
 import com.example.carebrief.core.model.DailyNote
 import com.example.carebrief.core.model.PlanStatus
@@ -24,7 +22,7 @@ object DemoData {
             age = 68,
             careStatus = "Stable · Assisted living",
             planStatus = PlanStatus.ACTIVE,
-            lastNoteLabel = "Yesterday, 18:05",
+            lastNoteLabel = "Today, 15:40",
             pendingTasks = 2,
             initials = "MC"
         ),
@@ -34,7 +32,7 @@ object DemoData {
             age = 75,
             careStatus = "Observation · Home care",
             planStatus = PlanStatus.NONE,
-            lastNoteLabel = "2 days ago",
+            lastNoteLabel = "Today, 10:20",
             pendingTasks = 1,
             initials = "AH"
         )
@@ -81,6 +79,15 @@ object DemoData {
 
     val michaelNotes = listOf(
         DailyNote(
+            id = "m0",
+            recipientId = "michael",
+            dayLabel = "Today",
+            timeLabel = "15:40",
+            author = "Caregiver Omar",
+            content = "Michael was restless during the afternoon activity and needed gentle redirection. Settled with music.",
+            categories = listOf("Behavior", "Mood")
+        ),
+        DailyNote(
             id = "m1",
             recipientId = "michael",
             dayLabel = "Yesterday",
@@ -102,6 +109,15 @@ object DemoData {
 
     val aminaNotes = listOf(
         DailyNote(
+            id = "a0",
+            recipientId = "amina",
+            dayLabel = "Today",
+            timeLabel = "10:20",
+            author = "Nurse Layla",
+            content = "Morning walk went well with usual support. Appetite steady at breakfast.",
+            categories = listOf("Mobility", "Nutrition")
+        ),
+        DailyNote(
             id = "a1",
             recipientId = "amina",
             dayLabel = "2 days ago",
@@ -112,20 +128,4 @@ object DemoData {
         )
     )
 
-    val attention = listOf(
-        AttentionItem(
-            title = "Potential concern · Reduced appetite",
-            description = "Mentioned in 3 of the last 4 notes. Review suggested."
-        ),
-        AttentionItem(
-            title = "Watch · Fatigue pattern",
-            description = "Tiredness noted repeatedly this week. Keep observing energy and sleep."
-        )
-    )
-
-    val recentActivity = listOf(
-        ActivityItem("Sarah — Daily note added", "Today · 09:30 · Nutrition, Energy"),
-        ActivityItem("Ahmed — Care plan updated", "Yesterday · Review completed"),
-        ActivityItem("Mona — 2 tasks completed", "Yesterday · Meal intake logs")
-    )
 }

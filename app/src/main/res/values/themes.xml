@@ -6,4 +6,10 @@
         <item name="android:navigationBarColor">@android:color/white</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
+
+    <!-- Phase 31 — launch splash applied to MainActivity in the manifest.
+         MainActivity switches back to Theme.CareBrief before super.onCreate(). -->
+    <style name="Theme.CareBrief.Splash" parent="Theme.CareBrief">
+        <item name="android:windowBackground">@drawable/splash_background</item>
+    </style>
 </resources>

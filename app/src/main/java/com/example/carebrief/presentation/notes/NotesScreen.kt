@@ -59,6 +59,15 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
+/** Phase 28 — explicit notes timeline state: Loading / Content / Empty / Error. */
+sealed interface NotesScreenState {
+    data object Loading : NotesScreenState
+    data class Content(val groups: List<TimelineGroup>, val filtering: Boolean = false) : NotesScreenState
+    data object Empty : NotesScreenState
+    data object FilteredEmpty : NotesScreenState
+    data class Error(val message: String = "Something went wrong while loading this information.") : NotesScreenState
+}
+
 class NotesViewModel(
     initialRecipientId: String = "sarah",
     private val repo: CareBriefRepository = DemoCareBriefRepository.shared
@@ -111,6 +120,24 @@ class NotesViewModel(
             list?.let { TimelineGrouper.group(filterNotes(it, c, d)) }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    /**
+     * Phase 28 canonical state: Loading (notes not yet emitted) / Error /
+     * Empty (no notes, or filters exclude everything) / Content (timeline groups).
+     * [groups]/[notes]/[loadError] above are kept as compat aliases.
+     */
+    val screenState: StateFlow<NotesScreenState> = combine(
+        notes, groups, category, day, _loadError
+    ) { all, grouped, c, d, failed ->
+        when {
+            all == null || grouped == null -> NotesScreenState.Loading as NotesScreenState
+            failed && grouped.isEmpty() && all.isEmpty() -> NotesScreenState.Error()
+            grouped.isEmpty() && (c != null || d != null) && all.isNotEmpty() ->
+                NotesScreenState.FilteredEmpty
+            grouped.isEmpty() -> NotesScreenState.Empty
+            else -> NotesScreenState.Content(grouped, filtering = c != null || d != null)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NotesScreenState.Loading)
+
     class Factory(private val recipientId: String) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
@@ -125,9 +152,6 @@ fun NotesScreen(
     onAnalyze: (String) -> Unit,
     vm: NotesViewModel = viewModel(factory = NotesViewModel.Factory(recipientId))
 ) {
-    val groups by vm.groups.collectAsState()
-    val allNotes by vm.notes.collectAsState()
-    val loadError by vm.loadError.collectAsState()
     val selectedId by vm.currentRecipient().collectAsState()
     val categories by vm.availableCategories.collectAsState()
     val days by vm.availableDays.collectAsState()
@@ -215,43 +239,39 @@ fun NotesScreen(
             Spacer(Modifier.height(4.dp))
         }
         Spacer(Modifier.height(12.dp))
-        when (val list = groups) {
-            null -> LoadingRow("Loading notes")
-            else -> {
-                if (loadError && list.isEmpty() && allNotes.isNullOrEmpty()) {
-                    com.example.carebrief.core.ui.components.ErrorState(
-                        "Something went wrong while loading this information.",
-                        onRetry = vm::retry
-                    )
-                } else if (list.isEmpty()) {
-                    val filtering = selectedCategory != null || selectedDay != null
-                    if (filtering && !allNotes.isNullOrEmpty()) {
-                        EmptyState(
-                            "No notes match these filters.",
-                            "Try a different topic or date.",
-                            "Clear filters"
-                        ) { vm.selectCategory(null); vm.selectDay(null) }
-                    } else {
-                        EmptyState("No notes yet.", "Add your first note to start the timeline.", "Add your first note") {
-                            onAddNote(selectedId)
+        // Phase 28: single explicit state drives Loading / Empty / Error / Success.
+        val screenState by vm.screenState.collectAsState()
+        when (val s = screenState) {
+            NotesScreenState.Loading -> LoadingRow("Loading notes")
+            is NotesScreenState.Error -> com.example.carebrief.core.ui.components.ErrorState(
+                s.message,
+                onRetry = vm::retry
+            )
+            NotesScreenState.FilteredEmpty -> EmptyState(
+                "No notes match these filters.",
+                "Try a different topic or date.",
+                "Clear filters"
+            ) { vm.selectCategory(null); vm.selectDay(null) }
+            NotesScreenState.Empty -> EmptyState(
+                "No notes yet.",
+                "Add your first note to start the timeline.",
+                "Add your first note"
+            ) { onAddNote(selectedId) }
+            is NotesScreenState.Content -> {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(CareBriefSpacing.sm),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    s.groups.forEach { group ->
+                        item(key = "header-${group.dayLabel}-$selectedId") {
+                            TimelineDayHeader(group.dayLabel.uppercase(), "${group.notes.size} note(s)")
                         }
-                    }
-                } else {
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(CareBriefSpacing.sm),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        list.forEach { group ->
-                            item(key = "header-${group.dayLabel}-$selectedId") {
-                                TimelineDayHeader(group.dayLabel.uppercase(), "${group.notes.size} note(s)")
-                            }
-                            group.notes.forEach { note ->
-                                item(key = note.id) {
-                                    TimelineEntry(
-                                        isAnalyzed = note.id in analyzedIds,
-                                        note = note
-                                    )
-                                }
+                        group.notes.forEach { note ->
+                            item(key = note.id) {
+                                TimelineEntry(
+                                    isAnalyzed = note.id in analyzedIds,
+                                    note = note
+                                )
                             }
                         }
                     }

@@ -2,13 +2,20 @@ package com.example.carebrief.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.carebrief.core.model.CarePlan
+import com.example.carebrief.core.model.CarePlanStatus
+import com.example.carebrief.core.model.toCarePlanStatus
+import com.example.carebrief.core.model.toCarePriority
 import com.example.carebrief.core.model.DailyNote
 import com.example.carebrief.data.ai.AiCareAssistant
 import com.example.carebrief.data.ai.AiProviders
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.collect
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -39,6 +46,9 @@ class CarePlanStore(
     private val flows = mutableMapOf<String, MutableStateFlow<EditableCarePlan?>>()
     private val lock = Any()
     @Volatile private var preferences: SharedPreferences? = null
+    @Volatile private var roomRepository: CarePlanRepository? = null
+    @Volatile private var persistenceScope: CoroutineScope? = null
+    private val observingRecipients = mutableSetOf<String>()
 
     fun restore(context: Context) = synchronized(lock) {
         preferences = context.getSharedPreferences("carebrief_care_plans", Context.MODE_PRIVATE)
@@ -52,7 +62,46 @@ class CarePlanStore(
         flows.getOrPut(recipientId) { MutableStateFlow(null) }
     }
 
-    fun observe(recipientId: String): StateFlow<EditableCarePlan?> = mutable(recipientId)
+    fun observe(recipientId: String): StateFlow<EditableCarePlan?> {
+        observeRoom(recipientId)
+        return mutable(recipientId)
+    }
+
+    fun attach(repository: CarePlanRepository, scope: CoroutineScope) {
+        roomRepository = repository
+        persistenceScope = scope
+        val recipientIds = synchronized(lock) { flows.keys.toList() } +
+            (preferences?.all?.keys?.toList() ?: emptyList())
+        recipientIds.distinct().forEach(::observeRoom)
+    }
+
+    private fun observeRoom(recipientId: String) {
+        val repository = roomRepository ?: return
+        val scope = persistenceScope ?: return
+        if (!synchronized(lock) { observingRecipients.add(recipientId) }) return
+        scope.launch {
+            var firstEmission = true
+            repository.observeForRecipient(recipientId).collect { plans ->
+                val local = mutable(recipientId)
+                if (firstEmission) {
+                    firstEmission = false
+                    val cached = local.value
+                    if (plans.isNotEmpty()) {
+                        local.value = plans.first().toEditable()
+                        preferences?.edit()?.remove(recipientId)?.apply()
+                    } else if (cached != null) {
+                        if (runCatching { repository.save(cached.toModel()) }.isSuccess) {
+                            preferences?.edit()?.remove(recipientId)?.apply()
+                        }
+                    } else {
+                        preferences?.edit()?.remove(recipientId)?.apply()
+                    }
+                } else {
+                    local.value = plans.firstOrNull()?.toEditable()
+                }
+            }
+        }
+    }
 
     fun defaultFor(recipientId: String, notes: List<DailyNote>): EditableCarePlan {
         val draft = ai.generateCarePlanDraft(notes)
@@ -91,7 +140,7 @@ class CarePlanStore(
             updatedAtMillis = now
         )
         mutable(plan.recipientId).value = saved
-        preferences?.edit()?.putString(plan.recipientId, encodePlan(saved))?.apply()
+        persist(saved)
     }
 
     fun approve(recipientId: String) {
@@ -103,7 +152,20 @@ class CarePlanStore(
             updatedAtMillis = now
         )
         mutable(recipientId).value = approved
-        preferences?.edit()?.putString(recipientId, encodePlan(approved))?.apply()
+        persist(approved)
+    }
+
+    private fun persist(plan: EditableCarePlan) {
+        val repository = roomRepository
+        val scope = persistenceScope
+        if (repository != null && scope != null) {
+            scope.launch {
+                val latest = mutable(plan.recipientId).value ?: plan
+                repository.save(latest.toModel())
+            }
+        } else {
+            preferences?.edit()?.putString(plan.recipientId, encodePlan(plan))?.apply()
+        }
     }
 
     /** Clears all edited plans (used by Settings → Reset demo data). */
@@ -111,6 +173,41 @@ class CarePlanStore(
         flows.values.forEach { it.value = null }
         preferences?.edit()?.clear()?.apply()
     }
+
+    private fun EditableCarePlan.toModel() = CarePlan(
+        id = recipientId,
+        recipientId = recipientId,
+        goal = goal,
+        reason = reason,
+        actions = actions,
+        monitoringIndicators = monitoring,
+        priority = priority.toCarePriority(),
+        status = status.toCarePlanStatus(),
+        reviewDateMillis = reviewDateMillis,
+        reviewDateLabel = reviewDateLabel,
+        createdAtMillis = createdAtMillis,
+        updatedAtMillis = updatedAtMillis,
+        approvedAtMillis = approvedAtMillis
+    )
+
+    private fun CarePlan.toEditable() = EditableCarePlan(
+        recipientId = recipientId,
+        goal = goal,
+        reason = reason,
+        actions = actions,
+        monitoring = monitoringIndicators,
+        priority = priority.name.lowercase().replaceFirstChar { it.uppercase() },
+        reviewDateLabel = reviewDateLabel,
+        status = when (status) {
+            CarePlanStatus.ACTIVE -> "ACTIVE"
+            CarePlanStatus.ARCHIVED -> "ARCHIVED"
+            CarePlanStatus.DRAFT -> "DRAFT"
+        },
+        updatedAtMillis = updatedAtMillis,
+        reviewDateMillis = reviewDateMillis,
+        createdAtMillis = createdAtMillis,
+        approvedAtMillis = approvedAtMillis
+    )
 
     private fun encodePlan(plan: EditableCarePlan): String = JSONObject().apply {
         put("recipientId", plan.recipientId)

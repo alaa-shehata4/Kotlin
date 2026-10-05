@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Phase 31 — cold-start splash: calm mint background with the CareBrief mark
+     centered. Shown via Theme.CareBrief.Splash as windowBackground, then
+     replaced by the Compose UI once MainActivity resumes the app theme. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/ic_launcher_background" />
+    <item
+        android:width="108dp"
+        android:height="108dp"
+        android:drawable="@drawable/ic_launcher_foreground"
+        android:gravity="center" />
+</layer-list>

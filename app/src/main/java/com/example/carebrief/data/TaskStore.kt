@@ -3,10 +3,15 @@ package com.example.carebrief.data
 import android.content.Context
 import android.content.SharedPreferences
 import com.example.carebrief.core.model.CarePlanDraft
+import com.example.carebrief.core.model.CareTaskModel
+import com.example.carebrief.core.model.TaskPriority
 import com.example.carebrief.data.ai.AiCareAssistant
 import com.example.carebrief.data.ai.AiProviders
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.time.Instant
@@ -26,7 +31,8 @@ data class CareTask(
     val completed: Boolean,
     val updatedAtMillis: Long = System.currentTimeMillis(),
     val dueDateMillis: Long = 0L,
-    val sourceFingerprint: String = ""
+    val sourceFingerprint: String = "",
+    val createdAtMillis: Long = updatedAtMillis
 )
 
 /**
@@ -39,6 +45,11 @@ class TaskStore(
     private val flows = mutableMapOf<String, MutableStateFlow<List<CareTask>>>()
     private val lock = Any()
     @Volatile private var preferences: SharedPreferences? = null
+    @Volatile private var roomRepository: TaskRepository? = null
+    @Volatile private var persistenceScope: CoroutineScope? = null
+    private val observingRecipients = mutableSetOf<String>()
+    private val loadedRecipients = mutableSetOf<String>()
+    private val pendingDrafts = mutableMapOf<String, CarePlanDraft>()
 
     fun restore(context: Context) = synchronized(lock) {
         preferences = context.getSharedPreferences("carebrief_tasks", Context.MODE_PRIVATE)
@@ -52,10 +63,57 @@ class TaskStore(
         flows.getOrPut(recipientId) { MutableStateFlow(emptyList()) }
     }
 
-    fun observe(recipientId: String): StateFlow<List<CareTask>> = mutable(recipientId)
+    fun observe(recipientId: String): StateFlow<List<CareTask>> {
+        observeRoom(recipientId)
+        return mutable(recipientId)
+    }
+
+    fun attach(repository: TaskRepository, scope: CoroutineScope) {
+        roomRepository = repository
+        persistenceScope = scope
+        val recipientIds = synchronized(lock) { flows.keys.toList() } +
+            (preferences?.all?.keys?.toList() ?: emptyList())
+        recipientIds.distinct().forEach(::observeRoom)
+    }
+
+    private fun observeRoom(recipientId: String) {
+        val repository = roomRepository ?: return
+        val scope = persistenceScope ?: return
+        if (!synchronized(lock) { observingRecipients.add(recipientId) }) return
+        scope.launch {
+            var firstEmission = true
+            repository.observeForRecipient(recipientId).collect { stored ->
+                val flow = mutable(recipientId)
+                if (firstEmission) {
+                    firstEmission = false
+                    val cached = flow.value
+                    if (stored.isNotEmpty()) {
+                        flow.value = stored.map { it.toCareTask() }
+                        preferences?.edit()?.remove(recipientId)?.apply()
+                    } else if (cached.isNotEmpty()) {
+                        if (runCatching { repository.replaceForRecipient(recipientId, cached.map { it.toModel() }) }.isSuccess) {
+                            preferences?.edit()?.remove(recipientId)?.apply()
+                        }
+                    } else {
+                        preferences?.edit()?.remove(recipientId)?.apply()
+                    }
+                    synchronized(lock) { loadedRecipients.add(recipientId) }
+                    val pending = synchronized(lock) { pendingDrafts.remove(recipientId) }
+                    if (pending != null) ensureGenerated(recipientId, pending)
+                } else {
+                    flow.value = stored.map { it.toCareTask() }
+                }
+            }
+        }
+    }
 
     /** Regenerates when the plan changes, preserving state for unchanged actions. */
     fun ensureGenerated(recipientId: String, draft: CarePlanDraft) {
+        if (roomRepository != null && !synchronized(lock) { recipientId in loadedRecipients }) {
+            synchronized(lock) { pendingDrafts[recipientId] = draft }
+            observeRoom(recipientId)
+            return
+        }
         val flow = mutable(recipientId)
         val fingerprint = fingerprint(draft)
         if (flow.value.isNotEmpty() && flow.value.all { it.sourceFingerprint == fingerprint }) return
@@ -77,7 +135,8 @@ class TaskStore(
                 completed = existing?.completed ?: false,
                 updatedAtMillis = existing?.updatedAtMillis ?: System.currentTimeMillis(),
                 dueDateMillis = dueDate,
-                sourceFingerprint = fingerprint
+                sourceFingerprint = fingerprint,
+                createdAtMillis = existing?.createdAtMillis ?: System.currentTimeMillis()
             )
         }
         flow.value = generated
@@ -98,6 +157,7 @@ class TaskStore(
         flow.value = if (nextDueDate == null) updated else updated + task.copy(
             id = UUID.randomUUID().toString(),
             completed = false,
+            createdAtMillis = now,
             dueDateMillis = nextDueDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
             dueLabel = dueLabel(nextDueDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()),
             updatedAtMillis = now
@@ -145,6 +205,15 @@ class TaskStore(
         ).joinToString("\u001E") { "${it.length}:$it" }
 
     private fun persist(recipientId: String, tasks: List<CareTask>) {
+        val repository = roomRepository
+        val scope = persistenceScope
+        if (repository != null && scope != null) {
+            scope.launch {
+                val latest = mutable(recipientId).value
+                repository.replaceForRecipient(recipientId, latest.map { it.toModel() })
+            }
+            return
+        }
         val prefs = preferences ?: return // unit tests / pre-restore: memory only
         prefs.edit().putString(recipientId, JSONArray().apply {
             tasks.forEach { task ->
@@ -158,6 +227,7 @@ class TaskStore(
                     put("priority", task.priority)
                     put("completed", task.completed)
                     put("updatedAtMillis", task.updatedAtMillis)
+                    put("createdAtMillis", task.createdAtMillis)
                     put("dueDateMillis", task.dueDateMillis)
                     put("sourceFingerprint", task.sourceFingerprint)
                 })
@@ -180,7 +250,8 @@ class TaskStore(
                 completed = value.optBoolean("completed", false),
                 updatedAtMillis = value.optLong("updatedAtMillis", System.currentTimeMillis()),
                 dueDateMillis = value.optLong("dueDateMillis", 0L),
-                sourceFingerprint = value.optString("sourceFingerprint", "")
+                sourceFingerprint = value.optString("sourceFingerprint", ""),
+                createdAtMillis = value.optLong("createdAtMillis", value.optLong("updatedAtMillis", System.currentTimeMillis()))
             )
         }
     }
@@ -193,6 +264,46 @@ class TaskStore(
             else -> date.format(DateTimeFormatter.ofPattern("d MMM"))
         }
     }
+
+    private fun CareTask.toModel() = CareTaskModel(
+        id = id,
+        carePlanId = recipientId,
+        recipientId = recipientId,
+        title = title,
+        description = "",
+        dueDateMillis = dueDateMillis,
+        dueLabel = dueLabel,
+        priority = when (priority.trim().lowercase()) {
+            "low" -> TaskPriority.LOW
+            "high" -> TaskPriority.HIGH
+            else -> TaskPriority.NORMAL
+        },
+        category = category,
+        frequency = frequency,
+        completed = completed,
+        createdAtMillis = createdAtMillis,
+        updatedAtMillis = updatedAtMillis,
+        sourceFingerprint = sourceFingerprint
+    )
+
+    private fun CareTaskModel.toCareTask() = CareTask(
+        id = id,
+        recipientId = recipientId,
+        title = title,
+        category = category,
+        frequency = frequency,
+        dueLabel = dueLabel,
+        priority = when (priority) {
+            TaskPriority.LOW -> "Low"
+            TaskPriority.HIGH -> "High"
+            TaskPriority.NORMAL -> "Normal"
+        },
+        completed = completed,
+        createdAtMillis = createdAtMillis,
+        updatedAtMillis = updatedAtMillis,
+        dueDateMillis = dueDateMillis,
+        sourceFingerprint = sourceFingerprint
+    )
 
     companion object {
         val shared = TaskStore()

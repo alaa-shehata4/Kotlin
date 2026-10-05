@@ -5,6 +5,10 @@ import androidx.room.Room
 import com.example.carebrief.core.database.CareBriefDatabase
 import com.example.carebrief.data.DemoCareBriefRepository
 import com.example.carebrief.data.CarePlanStore
+import com.example.carebrief.data.PersistentRepositories
+import com.example.carebrief.data.RoomCarePlanRepository
+import com.example.carebrief.data.RoomInsightRepository
+import com.example.carebrief.data.RoomTaskRepository
 import com.example.carebrief.data.RoomCareBriefRepository
 import com.example.carebrief.data.SettingsStore
 import com.example.carebrief.data.TaskStore
@@ -28,8 +32,17 @@ class CareBriefApp : Application() {
             applicationContext,
             CareBriefDatabase::class.java,
             "carebrief.db"
-        ).addMigrations(CareBriefDatabase.MIGRATION_1_2).build()
+        ).addMigrations(
+            CareBriefDatabase.MIGRATION_1_2,
+            CareBriefDatabase.MIGRATION_2_3,
+            CareBriefDatabase.MIGRATION_3_4
+        ).build()
         val repository = RoomCareBriefRepository(database)
+        PersistentRepositories.carePlans = RoomCarePlanRepository(database)
+        PersistentRepositories.tasks = RoomTaskRepository(database)
+        PersistentRepositories.insights = RoomInsightRepository(database)
+        CarePlanStore.shared.attach(PersistentRepositories.carePlans!!, applicationScope)
+        TaskStore.shared.attach(PersistentRepositories.tasks!!, applicationScope)
         DemoCareBriefRepository.shared = repository
         applicationScope.launch {
             repository.seedIfEmpty()
