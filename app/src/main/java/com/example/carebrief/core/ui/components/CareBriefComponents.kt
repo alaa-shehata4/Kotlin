@@ -164,12 +164,14 @@ fun SectionHeader(
 @Composable
 fun StatusChip(text: String, kind: ChipKind = ChipKind.NEUTRAL) {
     val (bg, fg) = when (kind) {
-        ChipKind.NEUTRAL -> SageContainer to MaterialTheme.colorScheme.onSecondaryContainer
+        ChipKind.NEUTRAL -> MaterialTheme.colorScheme.secondaryContainer to
+            MaterialTheme.colorScheme.onSecondaryContainer
         ChipKind.DRAFT -> AmberContainer to AmberText
         ChipKind.ACTIVE -> SuccessContainer to SuccessText
         ChipKind.CONCERN -> AmberContainer to AmberText
         ChipKind.CRITICAL -> CriticalContainer to CriticalText
-        ChipKind.INFO -> MintContainer to MaterialTheme.colorScheme.onPrimaryContainer
+        ChipKind.INFO -> MaterialTheme.colorScheme.primaryContainer to
+            MaterialTheme.colorScheme.onPrimaryContainer
     }
     Surface(
         color = bg,

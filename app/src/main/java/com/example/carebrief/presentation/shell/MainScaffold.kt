@@ -117,7 +117,7 @@ fun MainScaffold(
                         )
                     }
                 }
-                MainNavHost(nav, startDestination, Modifier.weight(1f))
+                MainNavHost(nav, startDestination, onResetOnboarding, Modifier.weight(1f))
             }
             return@BoxWithConstraints
         }
@@ -136,7 +136,7 @@ fun MainScaffold(
                 }
             }
         ) { padding ->
-            MainNavHost(nav, startDestination, Modifier.padding(padding))
+            MainNavHost(nav, startDestination, onResetOnboarding, Modifier.padding(padding))
         }
     }
 }
@@ -145,6 +145,7 @@ fun MainScaffold(
 private fun MainNavHost(
     nav: androidx.navigation.NavHostController,
     startDestination: String,
+    onResetOnboarding: () -> Unit,
     modifier: Modifier = Modifier
 ) {
         NavHost(
@@ -204,6 +205,9 @@ private fun MainNavHost(
                     onEdit = { id -> nav.navigate(Routes.planEdit(id)) },
                     onViewTasks = { id -> nav.navigate(Routes.tasks(id)) }
                 )
+            }
+            composable(Routes.MORE) {
+                MoreScreen(onResetOnboarding = onResetOnboarding)
             }
             composable(
                 Routes.PLAN_DETAIL,
