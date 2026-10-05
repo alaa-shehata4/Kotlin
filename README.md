@@ -89,18 +89,6 @@ any provider:
    ship secrets in the APK), handle its errors as the existing `Error` screen
    states do, and flip the provider in Settings.
 
-## Screenshots
-
-> Screenshots are captured from the debug APK on a standard phone emulator.
-
-| Dashboard | Notes timeline | AI summary |
-|---|---|---|
-| *Greeting, metrics, attention, activity* | *Filterable chronology with AI status* | *Draft badge, patterns, evidence* |
-
-| Care plan | Tasks | Settings |
-|---|---|---|
-| *Draft vs. active with progress* | *Today / upcoming / completed* | *Theme, AI, data, privacy* |
-
 ## Running
 
 Prerequisites: Android Studio (or command-line tools), JDK 17+.
